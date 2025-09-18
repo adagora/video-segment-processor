@@ -5,6 +5,7 @@ processing video and upload this to RAGFlow
 - llm vision to detect action on image
 - audio *.mp3 -> transcript scribe_v1, 11labs -> text
 - resports uploaded to RAG DB (RAGFLOW)
+- timestamp
 
 ## .env
 ```
@@ -37,4 +38,8 @@ python video_segment_processor.py --video "Nowości 2025- Modest Ligfht.mp4" --s
 ## Other
 ```
 ffprobe -v quiet -print_format json -show_format -show_streams "Nowości 2025- Modest Ligfht_segment_0.mp3"
+```
+## Timestamp
+```
+cd /c/AI_projects/VideoProcessor && python video_segment_processor.py --video "Nowości 2025- Modest Ligfht.mp4?timestamps=1" --segment-duration 60
 ```

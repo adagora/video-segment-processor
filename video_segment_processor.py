@@ -13,14 +13,11 @@ import tempfile
 from pathlib import Path
 import argparse
 from dotenv import load_dotenv
+from urllib.parse import urlparse, parse_qs
 
-
-# Ignoruj ostrzeżenia
 warnings.filterwarnings("ignore")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-
-# Ustaw format logów
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -28,20 +25,43 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Konfiguracja API RAGFlow - ładowana z zmiennych środowiskowych
-RAGFLOW_API_URL = None  # Ładowane z env
-RAGFLOW_API_KEY = None  # Ładowane z env
+RAGFLOW_API_URL = None
+RAGFLOW_API_KEY = None
+
+
+def parse_video_path_with_params(video_path_argument):
+    """
+    Parsuje ścieżkę wideo z parametrami URL i zwraca ścieżkę oraz opcje
+    
+    Args:
+        video_path_argument: Ścieżka wideo z opcjonalnymi parametrami (np. "video.mp4?timestamps=1")
+    
+    Returns:
+        tuple: (clean_video_path, options_dict)
+    """
+    if '?' in video_path_argument:
+        path_part, query_part = video_path_argument.split('?', 1)
+        params = parse_qs(query_part)
+        
+        timestamps = params.get("timestamps", ["0"])[0] in ("1", "true", "True")
+        
+        options = {
+            "timestamps": timestamps
+        }
+        
+        logger.info(f"Parsowanie ścieżki wideo z parametrami: {path_part}, opcje: {options}")
+        return path_part, options
+    else:
+        return video_path_argument, {"timestamps": False}
 
 
 def load_environment_config():
     """Załaduj konfigurację środowiska"""
-    # Spróbuj załadować plik .env
     env_file = os.path.join(os.path.dirname(__file__), '.env')
     if os.path.exists(env_file):
         load_dotenv(env_file)
         logger.info(f"Załadowano plik zmiennych środowiskowych: {env_file}")
     else:
-        # Jeśli nie ma .env, spróbuj config.env
         config_file = os.path.join(os.path.dirname(__file__), 'config.env')
         if os.path.exists(config_file):
             load_dotenv(config_file)
@@ -49,12 +69,10 @@ def load_environment_config():
         else:
             logger.warning("Nie znaleziono .env ani config.env, używane będą zmienne systemowe")
     
-    # Załaduj konfigurację do zmiennych globalnych
     global RAGFLOW_API_URL, RAGFLOW_API_KEY
     RAGFLOW_API_URL = os.getenv('RAGFLOW_API_URL', 'http://localhost:9380')
     RAGFLOW_API_KEY = os.getenv('RAGFLOW_API_KEY')
     
-    # Sprawdź wymagane ustawienia
     if not RAGFLOW_API_KEY:
         logger.warning("Nie ustawiono RAGFLOW_API_KEY, funkcje RAGFlow będą niedostępne")
     
@@ -67,7 +85,6 @@ def get_dataset_by_name(name):
         "Authorization": f"Bearer {RAGFLOW_API_KEY}"
     }
 
-    # Pobierz wszystkie zbiory danych
     response = requests.get(
         f"{RAGFLOW_API_URL}/api/v1/datasets?name={name}",
         headers=headers
@@ -77,7 +94,6 @@ def get_dataset_by_name(name):
         result = response.json()
         if result.get("code") == 0:
             datasets = result.get("data", [])
-            # Szukaj zbioru danych o podanej nazwie
             for dataset in datasets:
                 if dataset.get("name") == name:
                     logger.info(f"Znaleziono istniejący zbiór danych: {name}, ID: {dataset.get('id')}")
@@ -87,9 +103,8 @@ def get_dataset_by_name(name):
     return None
 
 
-# Stała konfiguracja grafu wiedzy (GraphRAG), zapewnia spójność
 GRAPHRAG_CONFIG = {
-    "use_graphrag": True,  # Włącz funkcję grafu wiedzy
+    "use_graphrag": True,
     "entity_types": ["organization", "person", "geo", "event", "category"],
     "method": "general",
     "community": False,
@@ -104,16 +119,15 @@ def create_ragflow_dataset(name, description="Video segments dataset"):
         "Authorization": f"Bearer {RAGFLOW_API_KEY}"
     }
 
-    # Konfiguracja zawiera ustawienia grafu wiedzy (graphrag)
     payload = {
         "name": name,
         "description": description,
-    "chunk_method": "naive",  # Użyj ogólnej metody dzielenia
+    "chunk_method": "naive",
         "parser_config": {
-            "chunk_token_num": 512,  # Zmniejsz liczbę tokenów, aby przyspieszyć przetwarzanie
+            "chunk_token_num": 512,
             "delimiter": "\n",
             "filename_embd_weight": 0.1,
-            "task_page_size": 5,  # Zmniejsz rozmiar strony zadania, aby uniknąć przekroczenia czasu
+            "task_page_size": 5,
             "raptor": {
                 "use_raptor": False
             },
@@ -170,12 +184,10 @@ def verify_dataset_graphrag_config(dataset_id):
                 graphrag_config = parser_config.get("graphrag", {})
 
 
-                # Sprawdź kluczowe ustawienia
                 chunk_method = dataset_data.get("chunk_method", "unknown")
                 parser_id = dataset_data.get("parser_id", "unknown")
                 is_graphrag_enabled = graphrag_config.get("use_graphrag", False)
 
-                # Prawdziwy warunek aktywacji grafu wiedzy
                 is_kg_dataset = (chunk_method == "knowledge_graph" and parser_id == "knowledge_graph")
 
                 logger.info(f"📊 Weryfikacja konfiguracji grafu wiedzy dla zbioru {dataset_id}:")
@@ -224,7 +236,6 @@ def check_document_status(dataset_id, document_id):
     }
 
     try:
-    # Użyj API List documents, aby pobrać informacje o konkretnym dokumencie po ID
         response = requests.get(
             f"{RAGFLOW_API_URL}/api/v1/datasets/{dataset_id}/documents?id={document_id}",
             headers=headers,
@@ -294,7 +305,6 @@ def wait_for_documents_parsing(dataset_id, document_ids, check_interval=30):
         current_time = time.time()
         elapsed_time = current_time - start_time
 
-    # Sprawdź czy każdy dokument ma chunk
         for doc_id in document_ids:
             if doc_id in completed_docs or doc_id in failed_docs:
                 continue
@@ -302,7 +312,6 @@ def wait_for_documents_parsing(dataset_id, document_ids, check_interval=30):
             status_info = check_document_status(dataset_id, doc_id)
             chunk_count = status_info.get("chunk_count", 0)
 
-            # Proste sprawdzenie: jeśli są chunk, to zakończono
             if chunk_count > 0:
                 completed_docs.add(doc_id)
                 print(f"✅ Dokument {doc_id} przetworzony (liczba chunków: {chunk_count})")
@@ -311,25 +320,21 @@ def wait_for_documents_parsing(dataset_id, document_ids, check_interval=30):
                 print(f"❌ Dokument {doc_id} nie został przetworzony")
 
 
-        # Wyświetl aktualny status
         remaining = len(document_ids) - len(completed_docs) - len(failed_docs)
         print(f"⏱️  Czas oczekiwania: {format_time(elapsed_time)} | "
               f"✅ Zakończone: {len(completed_docs)} | "
               f"❌ Nieudane: {len(failed_docs)} | "
               f"⏳ Oczekujące: {remaining}")
 
-        # Jeśli wszystkie dokumenty są przetworzone, zakończ pętlę
         if len(completed_docs) + len(failed_docs) == len(document_ids):
             print(f"\n{'=' * 60}")
             print("🎉 Wszystkie dokumenty zostały przetworzone!")
             print(f"{'=' * 60}")
             break
 
-        # Poczekaj przed kolejnym sprawdzeniem
         print(f"Czekam {check_interval} sekund przed kolejnym sprawdzeniem...")
         time.sleep(check_interval)
 
-    # Zwróć statystyki przetwarzania
     result = {
         "total": len(document_ids),
         "completed": len(completed_docs),
@@ -339,7 +344,6 @@ def wait_for_documents_parsing(dataset_id, document_ids, check_interval=30):
         "elapsed_time": time.time() - start_time
     }
 
-    # Wyświetl końcowe statystyki
     print(f"📊 Statystyki przetwarzania:")
     print(f"   Liczba dokumentów: {result['total']}")
     print(f"   Przetworzone pomyślnie: {result['completed']} ✅")
@@ -371,7 +375,6 @@ def parse_documents(dataset_id, document_ids):
         "Authorization": f"Bearer {RAGFLOW_API_KEY}"
     }
 
-    # Uproszczona logika: wyślij wszystkie ID dokumentów, zgodnie z process_videos_to_ragflow.py
     payload = {
         "document_ids": document_ids
     }
@@ -384,7 +387,7 @@ def parse_documents(dataset_id, document_ids):
             f"{RAGFLOW_API_URL}/api/v1/datasets/{dataset_id}/chunks",
             headers=headers,
             json=payload,
-            timeout=60  # Zwiększono limit czasu
+            timeout=60
         )
 
         logger.info(f"Kod statusu odpowiedzi: {response.status_code}")
@@ -422,20 +425,18 @@ def update_document_parser_config(dataset_id, document_id):
         "Authorization": f"Bearer {RAGFLOW_API_KEY}"
     }
 
-    # Ustaw konfigurację parsera dokumentu, włącz GraphRAG
     payload = {
-    "chunk_method": "naive",  # Użyj ogólnej metody dzielenia
+    "chunk_method": "naive", 
         "parser_config": {
-            "chunk_token_num": 512,  # Zmniejsz liczbę tokenów, aby przyspieszyć przetwarzanie
+            "chunk_token_num": 512,
             "delimiter": "\n",
             "filename_embd_weight": 0.1,
-            "task_page_size": 5,  # Zmniejsz rozmiar strony zadania, aby uniknąć przekroczenia czasu
-            "graphrag": GRAPHRAG_CONFIG  # Użyj spójnej konfiguracji GraphRAG
+            "task_page_size": 5, 
+            "graphrag": GRAPHRAG_CONFIG
         }
     }
 
     try:
-    # Wyślij żądanie aktualizacji
         response = requests.put(
             f"{RAGFLOW_API_URL}/api/v1/datasets/{dataset_id}/documents/{document_id}",
             headers=headers,
@@ -451,15 +452,12 @@ def update_document_parser_config(dataset_id, document_id):
                 return True
             else:
                 logger.error(f"Nie udało się zaktualizować konfiguracji parsera dokumentu: {result.get('message')}")
-                # Nawet jeśli aktualizacja się nie powiedzie, kontynuuj
                 return True
         else:
             logger.error(f"Nie udało się zaktualizować konfiguracji parsera dokumentu, kod statusu: {response.status_code}")
-            # Nawet jeśli aktualizacja się nie powiedzie, kontynuuj
             return True
     except Exception as e:
         logger.error(f"Błąd podczas aktualizacji konfiguracji parsera dokumentu: {e}")
-        # Nawet jeśli wystąpi błąd, kontynuuj
         return True
 
 
@@ -480,7 +478,6 @@ def upload_file_to_ragflow(dataset_id, file_name, file_path, file_type=None, aut
         "Authorization": f"Bearer {RAGFLOW_API_KEY}"
     }
 
-    # Ustal MIME type pliku
     import mimetypes
     mime_type = mimetypes.guess_type(file_path)[0]
     if mime_type is None:
@@ -495,14 +492,12 @@ def upload_file_to_ragflow(dataset_id, file_name, file_path, file_type=None, aut
         else:
             mime_type = 'application/octet-stream'
 
-    # Wyślij plik jako multipart/form-data
     try:
         with open(file_path, 'rb') as f:
             files = {
                 'file': (file_name, f, mime_type)
             }
 
-            # Jeśli określono typ pliku jako binary, dodaj parametr file_type
             params = {}
             if file_type == 'binary':
                 params['file_type'] = 'binary'
@@ -514,7 +509,7 @@ def upload_file_to_ragflow(dataset_id, file_name, file_path, file_type=None, aut
                 headers=headers,
                 files=files,
                 params=params,
-                timeout=60  # Zwiększono limit czasu
+                timeout=60
             )
     except Exception as e:
         logger.error(f"Nie udało się wysłać pliku: {e}")
@@ -529,7 +524,6 @@ def upload_file_to_ragflow(dataset_id, file_name, file_path, file_type=None, aut
                 result.get("data")) > 0 else None
             logger.info(f"Pomyślnie wysłano plik {file_name}, ID: {document_id}")
 
-            # Jeśli auto_parse, natychmiast wyzwól przetwarzanie dokumentu
             if auto_parse and document_id:
                 logger.info(f"Automatyczne wyzwalanie przetwarzania dokumentu {document_id}")
                 parse_documents(dataset_id, [document_id])
@@ -543,7 +537,7 @@ def upload_file_to_ragflow(dataset_id, file_name, file_path, file_type=None, aut
         return None
 
 
-def segment_video(video_path, output_dir, segment_duration=200):
+def segment_video(video_path, output_dir, segment_duration=200, timestamps=False):
     """
     Segmentuje wideo i zapisuje do określonego katalogu.
 
@@ -551,15 +545,14 @@ def segment_video(video_path, output_dir, segment_duration=200):
         video_path: Ścieżka do pliku wideo.
         output_dir: Katalog wyjściowy.
         segment_duration: Czas trwania każdego segmentu wideo (w sekundach).
+        timestamps: Czy dodać znaczniki czasu do wideo.
 
     Returns:
         Lista słowników z informacjami o segmentach. Każdy słownik zawiera klucze
         takie jak 'mp4_path', 'mp3_path', 'start_time', 'end_time'.
     """
-    # Upewnij się, że katalog wyjściowy istnieje
     os.makedirs(output_dir, exist_ok=True)
 
-    # Pobierz całkowity czas trwania wideo
     try:
         result = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -574,11 +567,9 @@ def segment_video(video_path, output_dir, segment_duration=200):
         logger.error(f"Nie udało się pobrać czasu trwania wideo: {e}")
         return []
 
-    # Oblicz liczbę segmentów
     num_segments = int(duration / segment_duration) + (1 if duration % segment_duration > 0 else 0)
     logger.info(f"Podziel wideo na {num_segments} segmentów, każdy po {segment_duration} sekund")
 
-    # Nazwa pliku wideo (bez rozszerzenia)
     video_name = os.path.splitext(os.path.basename(video_path))[0]
 
     segments = []
@@ -586,7 +577,6 @@ def segment_video(video_path, output_dir, segment_duration=200):
         start_time = i * segment_duration
         end_time = min((i + 1) * segment_duration, duration)
 
-        # Utwórz informacje o segmencie
         segment_info = {
             'index': i,
             'start_time': start_time,
@@ -594,25 +584,54 @@ def segment_video(video_path, output_dir, segment_duration=200):
             'duration': end_time - start_time
         }
 
-        # Zbuduj ścieżkę pliku wyjściowego
         mp4_path = os.path.join(output_dir, f"{video_name}_segment_{i}.mp4")
         mp3_path = os.path.join(output_dir, f"{video_name}_segment_{i}.mp3")
 
-        # Wyodrębnij segment wideo
         try:
             logger.info(f"Wyodrębnianie segmentu wideo {i + 1}/{num_segments}: {start_time:.2f}s - {end_time:.2f}s")
-            subprocess.run([
-                'ffmpeg', '-y', '-ss', str(start_time),
-                '-to', str(end_time), '-i', video_path,
-                '-c', 'copy', mp4_path
-            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            if timestamps:
+                base_name = os.path.basename(video_path)
+                
+                # Format: "video.mp4 [01:00] + PTS" gdzie [01:00] to start_time a PTS to offset
+                hours = int(start_time // 3600)
+                minutes = int((start_time % 3600) // 60)
+                seconds = int(start_time % 60)
+                
+                if hours > 0:
+                    start_time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                else:
+                    start_time_str = f"{minutes:02d}:{seconds:02d}"
+                
+                start_time_str_escaped = start_time_str.replace(":", "\\:")
+                text = f"{base_name} {start_time_str_escaped}+%{{pts\\:hms}}"
+                draw_filter = (
+                    f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
+                    f":text='{text}':x=w-tw-10:y=h-th-10"
+                )
+                
+                logger.info(f"Dodawanie znaczników czasu do segmentu wideo (bazowy czas: {start_time_str}) z filtrem drawtext")
+                
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y', '-ss', str(start_time),
+                    '-to', str(end_time), '-i', video_path,
+                    '-vf', draw_filter, '-c:a', 'copy', mp4_path
+                ]
+                logger.info(f"Komenda ffmpeg: {' '.join(ffmpeg_cmd)}")
+                
+                subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            else:
+                subprocess.run([
+                    'ffmpeg', '-y', '-ss', str(start_time),
+                    '-to', str(end_time), '-i', video_path,
+                    '-c', 'copy', mp4_path
+                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             segment_info['mp4_path'] = mp4_path
         except Exception as e:
             logger.error(f"Nie udało się wyodrębnić segmentu wideo: {e}")
             continue
 
-        # Wyodrębnij segment audio
         try:
             logger.info(f"Wyodrębnianie segmentu audio {i + 1}/{num_segments}")
             subprocess.run([
@@ -643,7 +662,6 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
     Returns:
         Szczegółowy transkrypt w formacie tekstowym, lub komunikat o błędzie.
     """
-    # Użyj przekazanego klucza API lub pobierz go ze zmiennych środowiskowych
     if not elevenlabs_api_key:
         elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
 
@@ -652,7 +670,6 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
         return "Nie przeprowadzono rozpoznawania mowy z powodu braku klucza API."
 
     try:
-        # Sprawdź, czy plik audio nie jest pusty
         audio_size = os.path.getsize(audio_path)
         logger.info(f"Rozmiar pliku audio {audio_path}: {audio_size} bajtów")
 
@@ -660,7 +677,6 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
             logger.warning(f"Plik audio {audio_path} jest zbyt mały ({audio_size} bajtów), prawdopodobnie jest cichy lub uszkodzony. Pomijanie transkrypcji.")
             return "Plik audio był pusty lub uszkodzony."
 
-        # Sprawdź właściwości audio za pomocą ffprobe
         try:
             probe_result = subprocess.run([
                 'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', audio_path
@@ -681,7 +697,6 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
         except Exception as e:
             logger.warning(f"Błąd podczas sprawdzania właściwości audio: {e}")
 
-        # Lista modeli do wypróbowania w kolejności (od najbardziej dokładnego do podstawowego)
         models_to_try = ['scribe_v1']
         transcription_result = None
 
@@ -689,14 +704,12 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
             try:
                 logger.info(f"Próbuję model {model} dla {audio_path}...")
 
-                # Użyj tylko metody HTTP API
                 url = "https://api.elevenlabs.io/v1/speech-to-text"
                 headers = {"xi-api-key": elevenlabs_api_key}
 
                 with open(audio_path, 'rb') as f:
                     files = {'file': (os.path.basename(audio_path), f, 'audio/mpeg')}
 
-                    # Ustaw parametry żądania, aby uzyskać szczegółowe dane
                     data = {
                         'model_id': model,
                         'diarize': 'true',  # Włącz diariyzację (identyfikację mówców)
@@ -725,24 +738,20 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                             text = token.get("text", "")
                             start_time = token.get("start", 0)
                             
-                            # Jeśli zmienił się mówca, zakończ poprzedni segment
                             if current_speaker != speaker_id and current_segment_text.strip():
                                 formatted_line = f"[{time.strftime('%H:%M:%S', time.gmtime(current_segment_start))} - {current_speaker}] {current_segment_text.strip()}"
                                 formatted_transcript.append(formatted_line)
                                 current_segment_text = ""
                             
-                            # Aktualizuj informacje o bieżącym segmencie
                             if current_speaker != speaker_id:
                                 current_speaker = speaker_id
                                 current_segment_start = start_time
                             
-                            # Dodaj tekst do bieżącego segmentu
                             if token_type == "word":
                                 current_segment_text += text
                             elif token_type == "spacing":
                                 current_segment_text += text
                         
-                        # Dodaj ostatni segment
                         if current_segment_text.strip():
                             formatted_line = f"[{time.strftime('%H:%M:%S', time.gmtime(current_segment_start))} - {current_speaker}] {current_segment_text.strip()}"
                             formatted_transcript.append(formatted_line)
@@ -751,13 +760,12 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                         if final_text.strip():
                             logger.info(f"ElevenLabs Scribe ({model}) HTTP zakończone sukcesem. Długość transkryptu: {len(final_text)} znaków")
                             transcription_result = final_text
-                            break  # Sukces, przerywamy pętlę
+                            break 
                         else:
                             logger.warning(f"Transkrypcja ({model}) HTTP zakończona, ale transkrypt jest pusty mimo {len(result.get('words', []))} tokenów")
                             transcription_result = "W tym segmencie nie wykryto mowy."
-                            continue  # Próbuj następny model
+                            continue
                     elif isinstance(result, list) and len(result) > 0:
-                        # Stary format odpowiedzi ElevenLabs - lista tokenów bezpośrednio
                         formatted_transcript = []
                         current_speaker = None
                         current_segment_text = ""
@@ -769,7 +777,6 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                             text = token.get("text", "")
                             start_time = token.get("start", 0)
                             
-                            # Jeśli zmienił się mówca, zakończ poprzedni segment
                             if current_speaker != speaker_id and current_segment_text.strip():
                                 formatted_line = f"[{time.strftime('%H:%M:%S', time.gmtime(current_segment_start))} - {current_speaker}] {current_segment_text.strip()}"
                                 formatted_transcript.append(formatted_line)
@@ -798,13 +805,11 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                             transcription_result = "W tym segmencie nie wykryto mowy."
                             continue 
                     elif "segments" in result and result["segments"]:
-                        # Stary format odpowiedzi ElevenLabs - segmenty
                         formatted_transcript = []
                         for segment in result["segments"]:
                             speaker = segment.get("speaker", "UNKNOWN_SPEAKER")
                             start_time = segment.get("start", 0)
 
-                            # Utwórz sformatowany wiersz dla każdego segmentu
                             line = f"[{time.strftime('%H:%M:%S', time.gmtime(start_time))} - {speaker}] {segment.get('text', '').strip()}"
                             formatted_transcript.append(line)
 
@@ -813,7 +818,6 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                         transcription_result = final_text
                         break 
                     else:
-                        # Obsługa przypadku, gdy w audio nie wykryto mowy
                         logger.warning(f"Transkrypcja ({model}) HTTP zakończona, ale nie wykryto mowy w {audio_path}. Pełna odpowiedź API: {json.dumps(result, indent=2, ensure_ascii=False)}")
                         transcription_result = "W tym segmencie nie wykryto mowy."
                         continue 
@@ -839,19 +843,20 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
         return f"Błąd krytyczny podczas rozpoznawania mowy: {str(e)}"
 
 
-def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
+def analyze_video_content(video_path, openai_api_key=None, frames_count=1, timestamps=False, segment_start_time=0):
     """
     Analizuje zawartość wideo za pomocą modelu OpenAI Vision.
 
     Args:
         video_path: Ścieżka do pliku wideo.
+        segment_start_time: Czas rozpoczęcia segmentu w oryginalnym wideo (w sekundach).
         openai_api_key: Klucz API OpenAI.
         frames_count: Liczba klatek kluczowych do wyodrębnienia, domyślnie 1.
+        timestamps: Czy dodać znaczniki czasu do wyodrębnianych klatek.
 
     Returns:
         Tekst z wynikami analizy.
     """
-    # Użyj przekazanego klucza API lub pobierz go ze zmiennych środowiskowych
     if not openai_api_key:
         openai_api_key = os.getenv('OPENAI_API_KEY')
 
@@ -859,7 +864,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
         logger.warning("Klucz API OpenAI nie jest ustawiony, nie można przeprowadzić analizy zawartości wideo")
         return "Nie przeprowadzono analizy zawartości wideo"
 
-    # Pobierz liczbę klatek ze zmiennych środowiskowych, jeśli nie podano parametru
     if frames_count == 1:
         frames_count = int(os.getenv('FRAMES_PER_SEGMENT', '1'))
 
@@ -869,11 +873,9 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
 
         client = OpenAI(api_key=openai_api_key)
 
-        # Użyj nazwy pliku wideo jako ID wideo
         video_name = os.path.basename(video_path)
         segment_id = os.path.splitext(video_name)[0]
 
-        # Wyodrębnij klatki kluczowe
         frame_paths = []
         try:
             result = subprocess.run(
@@ -886,21 +888,46 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
             duration = float(result.stdout.strip())
 
             if frames_count == 1:
-                # Ekstrakcja pojedynczej klatki: wyodrębnij klatkę ze środka wideo
                 frame_path = os.path.join(os.path.dirname(video_path),
                                           f"{os.path.splitext(os.path.basename(video_path))[0]}_keyframe.jpg")
                 middle_time = duration / 2
 
-                subprocess.run([
-                    'ffmpeg', '-y', '-ss', str(middle_time),
-                    '-i', video_path, '-vframes', '1',
-                    '-q:v', '2', frame_path
-                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if timestamps:
+                    base_name = os.path.basename(video_path)
+                    
+                    actual_time = segment_start_time + middle_time
+                    
+                    hours = int(actual_time // 3600)
+                    minutes = int((actual_time % 3600) // 60)
+                    seconds = int(actual_time % 60)
+                    
+                    if hours > 0:
+                        time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    else:
+                        time_str = f"{minutes:02d}:{seconds:02d}"
+                    
+                    time_str_escaped = time_str.replace(":", "\\:")
+                    text = f"{base_name} {time_str_escaped}"
+                    draw_filter = (
+                        f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
+                        f":text='{text}':x=w-tw-10:y=h-th-10"
+                    )
+                    
+                    subprocess.run([
+                        'ffmpeg', '-y', '-ss', str(middle_time),
+                        '-i', video_path, '-vframes', '1',
+                        '-vf', draw_filter, '-q:v', '2', frame_path
+                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                else:
+                    subprocess.run([
+                        'ffmpeg', '-y', '-ss', str(middle_time),
+                        '-i', video_path, '-vframes', '1',
+                        '-q:v', '2', frame_path
+                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 frame_paths = [frame_path]
                 logger.info(f"Pomyślnie wyodrębniono klatkę kluczową: {frame_path}")
             else:
-                # Ekstrakcja wielu klatek: wyodrębnij równomiernie rozłożone klatki kluczowe
                 interval = duration / (frames_count + 1)  # +1, aby uniknąć ostatniej klatki na samym końcu
 
                 for i in range(frames_count):
@@ -908,11 +935,38 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
                     frame_path = os.path.join(os.path.dirname(video_path),
                                               f"{os.path.splitext(os.path.basename(video_path))[0]}_keyframe_{i+1}.jpg")
 
-                    subprocess.run([
-                        'ffmpeg', '-y', '-ss', str(frame_time),
-                        '-i', video_path, '-vframes', '1',
-                        '-q:v', '2', frame_path
-                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    if timestamps:
+                        base_name = os.path.basename(video_path)
+                        
+                        actual_time = segment_start_time + frame_time
+                        
+                        hours = int(actual_time // 3600)
+                        minutes = int((actual_time % 3600) // 60)
+                        seconds = int(actual_time % 60)
+                        
+                        if hours > 0:
+                            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                        else:
+                            time_str = f"{minutes:02d}:{seconds:02d}"
+                        
+                        time_str_escaped = time_str.replace(":", "\\:")
+                        text = f"{base_name} {time_str_escaped}"
+                        draw_filter = (
+                            f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
+                            f":text='{text}':x=w-tw-10:y=h-th-10"
+                        )
+                        
+                        subprocess.run([
+                            'ffmpeg', '-y', '-ss', str(frame_time),
+                            '-i', video_path, '-vframes', '1',
+                            '-vf', draw_filter, '-q:v', '2', frame_path
+                        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    else:
+                        subprocess.run([
+                            'ffmpeg', '-y', '-ss', str(frame_time),
+                            '-i', video_path, '-vframes', '1',
+                            '-q:v', '2', frame_path
+                        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                     frame_paths.append(frame_path)
                     logger.info(f"Pomyślnie wyodrębniono klatkę kluczową {i+1}/{frames_count}: {frame_path}")
@@ -923,7 +977,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
             logger.error(f"Nie udało się wyodrębnić klatek kluczowych: {e}")
             return f"Nie udało się wyodrębnić klatek kluczowych: {str(e)}"
 
-        # Użyj API OpenAI Vision do analizy obrazów
         messages = [
             {
                 "role": "user",
@@ -936,7 +989,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
             }
         ]
 
-        # Dodaj obrazy do wiadomości
         for frame_path in frame_paths:
             with open(frame_path, 'rb') as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
@@ -948,9 +1000,8 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
                 }
             })
 
-        # Wywołaj API OpenAI Vision
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=messages,
             max_tokens=1000
         )
@@ -958,7 +1009,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1):
         analysis = response.choices[0].message.content
         logger.info(f"Analiza przez OpenAI Vision zakończona sukcesem, długość tekstu: {len(analysis)}")
 
-        # Sformatuj wynik analizy
         formatted_analysis = f"""
 Analiza wizualna fragmentu wideo (ID: {segment_id}):
 
@@ -994,7 +1044,6 @@ def generate_detailed_markdown_report(segment_info, transcript, visual_analysis,
     """
     import datetime
 
-    # Pobierz informacje o pliku wideo
     video_name = os.path.basename(video_path)
     video_dir = os.path.dirname(video_path)
     segment_index = segment_info.get('index', 0)
@@ -1002,7 +1051,6 @@ def generate_detailed_markdown_report(segment_info, transcript, visual_analysis,
     end_time = segment_info.get('end_time', 0)
     duration = segment_info.get('duration', 0)
 
-    # Formatuj czasy
     def format_time(seconds):
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
@@ -1016,7 +1064,6 @@ def generate_detailed_markdown_report(segment_info, transcript, visual_analysis,
     end_time_formatted = format_time(end_time)
     duration_formatted = format_time(duration)
 
-    # Pobierz całkowity czas trwania wideo
     try:
         result = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
@@ -1027,11 +1074,9 @@ def generate_detailed_markdown_report(segment_info, transcript, visual_analysis,
     except:
         total_duration_formatted = "Nieznany"
 
-    # Przygotuj informacje o plikach
     mp4_path = segment_info.get('mp4_path', '')
     mp3_path = segment_info.get('mp3_path', '')
 
-    # Generuj raport Markdown
     report = f"""# 📹 Raport Analizy Segmentu Wideo
 
 ## 📋 Informacje Ogólne
@@ -1104,60 +1149,14 @@ def generate_detailed_markdown_report(segment_info, transcript, visual_analysis,
 |----------|---------|
 | **Długość segmentu** | {segment_duration}s (z konfiguracji) |
 | **Liczba klatek na segment** | {frames_per_segment} (z konfiguracji) |
-| **Format wyjściowy** | Markdown (.md) |
-| **Kompatybilność z RAGFlow** | ✅ Tak |
 
-### 🔧 Narzędzia Użyte
-- **Segmentacja wideo**: FFmpeg
-- **Wyodrębnianie klatek**: FFmpeg
-- **Transkrypcja audio**: ElevenLabs Scribe V1 API
-- **Analiza wizualna**: OpenAI GPT-4o Vision API
-- **Generowanie raportu**: Python + Markdown
-
----
-
-## 📈 Podsumowanie i Wnioski
-
-### ✅ Zrealizowane Zadania
-- [x] Segmentacja wideo na części
-- [x] Wyodrębnienie ścieżki audio
-- [x] Transkrypcja mowy na tekst
-- [x] Analiza zawartości wizualnej
-- [x] Generowanie szczegółowego raportu
-- [x] Przygotowanie do przesłania do RAGFlow
-
-### 📋 Jakość Wyników
-| Komponent | Status | Jakość |
-|-----------|--------|---------|
-| **Transkrypcja** | {"✅ Dostępna" if transcript and transcript.strip() else "❌ Niedostępna"} | {"Wysoka" if transcript and len(transcript) > 50 else "Niska"} |
-| **Analiza wizualna** | {"✅ Dostępna" if visual_analysis and not visual_analysis.startswith("Nie") else "❌ Niedostępna"} | {"Wysoka" if visual_analysis and len(visual_analysis) > 100 else "Niska"} |
-
-### 🎯 Rekomendacje
-1. **Dla lepszej transkrypcji**: Upewnij się, że jakość audio jest wysoka
-2. **Dla dokładniejszej analizy wizualnej**: Zwiększ liczbę klatek kluczowych na segment
-3. **Dla optymalizacji**: Dostosuj długość segmentów do zawartości wideo
-
----
-
-## 🏷️ Tagi i Kategorie
-**Tagi**: `wideo`, `analiza`, `transkrypcja`, `sztuczna inteligencja`, `RAGFlow`
-
-**Kategorie**:
-- 📹 Przetwarzanie wideo
-- 🎵 Analiza audio
-- 👁️ Analiza wizualna
-- 📄 Generowanie raportów
-
----
-
-*Raport wygenerowany automatycznie przez system VideoProcessor*  
 *Data generowania: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
 """
 
     return report
 
 
-def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, frames_per_segment=1, segment_duration=200, video_path=None):
+def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, frames_per_segment=1, segment_duration=200, video_path=None, timestamps=False):
     """
     Przetwarza pojedynczy segment wideo, w tym transkrypcję mowy na tekst i analizę zawartości wideo.
 
@@ -1169,6 +1168,7 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
         frames_per_segment: Liczba klatek kluczowych do wyodrębnienia na segment.
         segment_duration: Długość segmentu w sekundach.
         video_path: Ścieżka do oryginalnego pliku wideo.
+        timestamps: Czy dodać znaczniki czasu do klatek wideo.
 
     Returns:
         Słownik z wynikami przetwarzania.
@@ -1180,26 +1180,23 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
         'combined_result_path': None
     }
 
-        # Transkrypcja audio na tekst
     if 'mp3_path' in segment_info:
         logger.info(f"Rozpoczynam przetwarzanie audio: {segment_info['mp3_path']}")
         transcript = transcribe_audio(segment_info['mp3_path'], elevenlabs_api_key)
-        result['transcript'] = transcript    # Analiza zawartości wideo (jeśli nie pominięto)
+        result['transcript'] = transcript
     if 'mp4_path' in segment_info and not skip_video_analysis:
         logger.info(f"Rozpoczynam analizę zawartości wideo: {segment_info['mp4_path']}, wyodrębnianie {frames_per_segment} klatek")
-        visual_analysis = analyze_video_content(segment_info['mp4_path'], openai_api_key, frames_per_segment)
+        visual_analysis = analyze_video_content(segment_info['mp4_path'], openai_api_key, frames_per_segment, timestamps, segment_info.get('start_time', 0))
         result['visual_analysis'] = visual_analysis
     elif skip_video_analysis:
         logger.info("Pominięto analizę zawartości wideo")
         result['visual_analysis'] = "Pominięto analizę zawartości wideo (konto API może mieć zaległości w płatnościach lub problemy z uprawnieniami)"
 
-    # Połącz wyniki i zapisz do pliku Markdown
     output_dir = os.path.dirname(segment_info.get('mp4_path', ''))
     if output_dir:
         segment_name = os.path.splitext(os.path.basename(segment_info.get('mp4_path', '')))[0]
         result_path = os.path.join(output_dir, f"{segment_name}_analysis.md")
 
-        # Wygeneruj szczegółowy raport Markdown
         markdown_content = generate_detailed_markdown_report(
             segment_info,
             result.get('transcript'),
@@ -1209,14 +1206,12 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
             frames_per_segment
         )
 
-        # Utwórz plik wynikowy
         with open(result_path, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
 
         result['combined_result_path'] = result_path
         logger.info(f"Wyniki przetwarzania zostały zapisane do: {result_path}")
 
-        # Zapisz również wyniki w formacie JSON
         json_result_path = os.path.join(output_dir, f"{segment_name}_result.json")
         with open(json_result_path, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -1228,41 +1223,35 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
 
 
 def main():
-    # Zadeklaruj zmienne globalne
     global RAGFLOW_API_URL, RAGFLOW_API_KEY
     
-    # Załaduj konfigurację zmiennych środowiskowych
     load_environment_config()
     
-    # Umieść ścieżki do swoich plików wideo na tej liście
     video_paths = [
         '/home/zy/ragflow/1101732139-1-208.mp4'
     ]
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja ścieżek wideo zakończona: {len(video_paths)} plików wideo")
 
-    # Załaduj parametry konfiguracyjne ze zmiennych środowiskowych
     output_dir = os.getenv('OUTPUT_DIR', './video_segments')
-    segment_duration = int(os.getenv('SEGMENT_DURATION', '200'))  # Jeden segment co 200 sekund
-    dataset_name = os.getenv('DATASET_NAME', 'Video Segments Dataset')  # Domyślna nazwa zbioru danych
-    frames_per_segment = int(os.getenv('FRAMES_PER_SEGMENT', '1'))  # Liczba klatek kluczowych do wyodrębnienia na segment
+    segment_duration = int(os.getenv('SEGMENT_DURATION', '200'))
+    dataset_name = os.getenv('DATASET_NAME', 'Video Segments Dataset')
+    frames_per_segment = int(os.getenv('FRAMES_PER_SEGMENT', '1'))
 
-    # Konfiguracja przełączników funkcji
     skip_video_analysis = os.getenv('SKIP_VIDEO_ANALYSIS', 'false').lower() == 'true'
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja funkcji: Analiza wideo {'pominięta' if skip_video_analysis else 'włączona'}, {frames_per_segment} klatek na segment")
 
-    # Ustaw poziom logowania dla requests na WARNING, aby zredukować niepotrzebne komunikaty
     import logging
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja RAGFlow zakończona, adres usługi: {RAGFLOW_API_URL}")
 
-    # Pobierz klucze API dużych modeli ze zmiennych środowiskowych
     elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
     openai_api_key = os.getenv('OPENAI_API_KEY')
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja kluczy API dużych modeli zakończona")
 
-    # Zachowaj funkcję parsowania argumentów wiersza poleceń, ale ustaw jako opcjonalną
-    if len(sys.argv) > 1:  # Jeśli podano argumenty wiersza poleceń
+    timestamps_enabled = False
+
+    if len(sys.argv) > 1:
         parser = argparse.ArgumentParser(description='Przetwarza wideo i przesyła do RAGFlow')
         parser.add_argument('--video', type=str, help='Ścieżka do pliku wideo')
         parser.add_argument('--output-dir', type=str, default='./video_segments', help='Katalog wyjściowy')
@@ -1273,14 +1262,17 @@ def main():
         parser.add_argument('--ragflow-api-key', type=str, default=None, help='Klucz API RAGFlow')
         parser.add_argument('--enable-video-analysis', action='store_true',
                             help='Włącz analizę zawartości wideo (domyślnie pominięta, wymaga ważnego klucza API)')
+        parser.add_argument('--timestamps', action='store_true',
+                            help='Dodaj znaczniki czasu do dolnego prawego rogu każdej klatki wideo')
 
         args = parser.parse_args()
 
-        # Jeśli wiersz poleceń określa wideo, nadpisz domyślną listę wideo
         if args.video:
             video_paths = [args.video]
 
-        # Zaktualizuj inne parametry
+        if args.timestamps:
+            timestamps_enabled = True
+
         if args.output_dir:
             output_dir = args.output_dir
         if args.segment_duration:
@@ -1289,50 +1281,49 @@ def main():
             frames_per_segment = args.frames_per_segment
         if args.dataset_name:
             dataset_name = args.dataset_name
-        # Jeśli argumenty wiersza poleceń nadpisują zmienne środowiskowe, zaktualizuj zmienne globalne
         if args.ragflow_api_url or args.ragflow_api_key:
             if args.ragflow_api_url:
                 RAGFLOW_API_URL = args.ragflow_api_url
             if args.ragflow_api_key:
                 RAGFLOW_API_KEY = args.ragflow_api_key
 
-    # Utwórz katalog wyjściowy
     os.makedirs(output_dir, exist_ok=True)
 
-    # Zapisz czas rozpoczęcia
     start_time = time.time()
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Rozpoczynam przetwarzanie wideo...")
 
-    # Przetwórz pierwsze wideo z listy
     if not video_paths:
         logger.error("Nie podano ścieżki do wideo, program zostanie zakończony")
         return
 
-    video_path = video_paths[0]  # Przetwarzaj pierwsze wideo
+    video_path_raw = video_paths[0]
+    video_path, video_options = parse_video_path_with_params(video_path_raw)
+    
+    timestamps_enabled = timestamps_enabled or video_options.get("timestamps", False)
+    
+    if timestamps_enabled:
+        logger.info("✅ Funkcja znaczników czasu jest włączona")
+    else:
+        logger.info("ℹ️ Funkcja znaczników czasu jest wyłączona")
 
-    # 1. Segmentacja wideo
     logger.info(f"Rozpoczynam przetwarzanie wideo: {video_path}")
-    segments = segment_video(video_path, output_dir, segment_duration)
+    segments = segment_video(video_path, output_dir, segment_duration, timestamps_enabled)
 
     if not segments:
         logger.error("Segmentacja wideo nie powiodła się, program zostanie zakończony")
         return
 
-    # 2. Przetwarzanie każdego segmentu wideo
     results = []
     for segment in segments:
         logger.info(f"Rozpoczynam przetwarzanie segmentu {segment['index'] + 1}/{len(segments)}")
-        result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis, frames_per_segment, segment_duration=segment_duration, video_path=video_path)
+        result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis, frames_per_segment, segment_duration=segment_duration, video_path=video_path, timestamps=timestamps_enabled)
         results.append(result)
 
-    # 3. Przesyłanie do RAGFlow
     if RAGFLOW_API_KEY:
         logger.info(f"Rozpoczynam przesyłanie wyników do RAGFlow, nazwa zbioru danych: {dataset_name}")
 
-        # Najpierw spróbuj pobrać istniejący zbiór danych
         dataset_id = get_dataset_by_name(dataset_name)
 
-        # Jeśli zbiór danych nie istnieje, utwórz nowy
         if not dataset_id:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Zbiór danych nie istnieje, próba utworzenia nowego zbioru danych...")
             dataset_id = create_ragflow_dataset(dataset_name)
@@ -1343,7 +1334,6 @@ def main():
         else:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Znaleziono istniejący zbiór danych, ID: {dataset_id}, zostanie on użyty bezpośrednio")
 
-        # Weryfikacja konfiguracji grafu wiedzy zbioru danych
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🔍 Weryfikacja konfiguracji grafu wiedzy zbioru danych...")
         config_result = verify_dataset_graphrag_config(dataset_id)
         if config_result["success"]:
@@ -1354,7 +1344,6 @@ def main():
         else:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Nie można zweryfikować konfiguracji grafu wiedzy zbioru danych: {config_result.get('error')}")
 
-        # Przesyłaj tylko dokumenty z wynikami analizy, nie przesyłaj plików MP3 i MP4
         document_ids = []
         for result in results:
             if 'combined_result_path' in result and result['combined_result_path']:
@@ -1362,10 +1351,8 @@ def main():
                 file_name = os.path.basename(file_path)
 
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Przesyłanie dokumentu z wynikami analizy: {file_name}")
-                # Podczas przesyłania ustaw auto_parse=False, aby później jednorazowo uruchomić parsowanie wszystkich dokumentów
                 document_id = upload_file_to_ragflow(dataset_id, file_name, file_path, auto_parse=False)
                 if document_id:
-                    # Po pomyślnym przesłaniu, natychmiast zaktualizuj konfigurację parsera dokumentu
                     update_success = update_document_parser_config(dataset_id, document_id)
                     if update_success:
                         document_ids.append(document_id)
@@ -1375,10 +1362,8 @@ def main():
                         print(
                             f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ostrzeżenie: Aktualizacja konfiguracji parsowania dla dokumentu {file_name} (ID: {document_id}) nie powiodła się")
 
-        # Uruchom parsowanie wszystkich dokumentów wsadowo
         if document_ids:
             logger.info(f"Rozpoczynam wsadowe uruchamianie parsowania wszystkich dokumentów, liczba dokumentów: {len(document_ids)}")
-            # Dla każdego dokumentu uruchom parsowanie osobno, aby uniknąć problemów, które mogą wystąpić przy przetwarzaniu wsadowym
             success_count = 0
             triggered_doc_ids = []
             for doc_id in document_ids:
@@ -1389,18 +1374,16 @@ def main():
                     logger.info(f"Uruchomienie parsowania dokumentu {doc_id} powiodło się")
                 else:
                     logger.warning(f"Uruchomienie parsowania dokumentu {doc_id} nie powiodło się")
-                # Dodaj krótkie opóźnienie, aby uniknąć zbyt częstych żądań
                 time.sleep(0.5)
 
             logger.info(f"Uruchomiono parsowanie dla {success_count}/{len(document_ids)} dokumentów")
 
-            # Oczekiwanie na zakończenie parsowania dokumentów
             if triggered_doc_ids:
                 logger.info("Rozpoczynam oczekiwanie na zakończenie parsowania dokumentów...")
                 parsing_result = wait_for_documents_parsing(
                     dataset_id,
                     triggered_doc_ids,
-                    check_interval=30  # Sprawdzaj co 30 sekund
+                    check_interval=30
                 )
 
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Statystyki zakończenia parsowania dokumentów:")
@@ -1409,7 +1392,6 @@ def main():
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Błędy parsowania: {parsing_result['failed']}")
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Czas parsowania: {parsing_result['elapsed_time']:.1f} sekund")
 
-                # Po zakończeniu parsowania dokumentów, poinformuj użytkownika, jak utworzyć asystenta
                 if parsing_result.get("completed", 0) > 0:
                     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🎉 Parsowanie dokumentów zakończone!")
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💡 Teraz możesz utworzyć asystenta wideo, uruchamiając następujące polecenie:")
@@ -1422,7 +1404,6 @@ def main():
             else:
                 logger.warning("Nie udało się uruchomić parsowania żadnego dokumentu")
 
-        # Zapisz czas zakończenia i całkowity czas trwania
         end_time = time.time()
         total_time = end_time - start_time
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Wszystkie operacje zakończone!")
