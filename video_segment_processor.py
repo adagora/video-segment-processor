@@ -1077,13 +1077,18 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
             logger.error(f"Nie udało się wyodrębnić klatek kluczowych: {e}")
             return f"Nie udało się wyodrębnić klatek kluczowych: {str(e)}"
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": """Przeanalizuj dokładnie załączony obraz będący slajdem prezentacji i wypisz wszystkie możliwe informacje w formie szczegółowej listy punktowanej. Uwzględnij:
+        analyses = []
+        for frame_path in frame_paths:
+            with open(frame_path, 'rb') as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """Przeanalizuj dokładnie załączony obraz będący slajdem prezentacji i wypisz wszystkie możliwe informacje w formie szczegółowej listy punktowanej. Nie analizuj zduplikowanych tych samych obrazów. Uwzględnij:
 
 Tytuł i nagłówki – rozpoznaj główny nagłówek slajdu.
 
@@ -1096,35 +1101,33 @@ Dodatkowe szczegóły – np. wszelkie napisy w stopce, znaki wodne, metadane lu
 Interpretacja treści – wyjaśnij, czego dotyczy agenda (np. nowe produkty, technologie, funkcje).
 
 Zadbaj, aby wynik był pełną, precyzyjną i uporządkowaną listą punktów, nie pomijając żadnych detali, nawet drobnych elementów graficznych."""
-                    }
-                ]
-            }
-        ]
-
-        for frame_path in frame_paths:
-            with open(frame_path, 'rb') as image_file:
-                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-
-            messages[0]["content"].append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{base64_image}"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
                 }
-            })
+            ]
 
-        response = client.chat.completions.create(
-            model="gpt-4.1",
-            messages=messages,
-            max_tokens=1000
-        )
+            response = client.chat.completions.create(
+                model="gpt-4.1",
+                messages=messages,
+                max_tokens=1000
+            )
 
-        analysis = response.choices[0].message.content
-        logger.info(f"Analiza przez OpenAI Vision zakończona sukcesem, długość tekstu: {len(analysis)}")
+            analysis = response.choices[0].message.content
+            analyses.append(f"Analiza klatki {len(analyses) + 1}:\n{analysis}")
+
+        combined_analysis = "\n\n---\n\n".join(analyses)
+        logger.info(f"Analiza przez OpenAI Vision zakończona sukcesem, długość tekstu: {len(combined_analysis)}")
 
         formatted_analysis = f"""
 Analiza wizualna fragmentu wideo (ID: {segment_id}):
 
-{analysis}
+{combined_analysis}
         """
 
         return formatted_analysis

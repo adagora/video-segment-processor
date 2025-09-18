@@ -6,6 +6,7 @@ processing video and upload this to RAGFlow
 - audio *.mp3 -> transcript scribe_v1, 11labs -> text
 - resports uploaded to RAG DB (RAGFLOW)
 - timestamp
+- analyse more frames per segment
 
 ## .env
 ```
@@ -19,7 +20,7 @@ SEGMENT_DURATION=200
 OUTPUT_DIR=./video_segments
 DATASET_NAME=zbior_danych_wideo
 SKIP_VIDEO_ANALYSIS=false
-FRAMES_PER_SEGMENT=1
+FRAMES_PER_SEGMENT=5
 ```
 
 ### install 
@@ -43,3 +44,4 @@ ffprobe -v quiet -print_format json -show_format -show_streams "Nowości 2025- M
 ```
 cd /c/AI_projects/VideoProcessor && python video_segment_processor.py --video "Nowości 2025- Modest Ligfht.mp4?timestamps=1" --segment-duration 60
 ```
+
