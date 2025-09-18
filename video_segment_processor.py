@@ -651,16 +651,107 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
     return segments
 
 
-def transcribe_audio(audio_path, elevenlabs_api_key=None):
+def create_granular_transcript(words_data, segment_start_time=0, timestamp_interval=10, sentence_timestamps=True):
+    """
+    Tworzy transkrypt z granularnymi znacznikami czasu na podstawie danych słowo-po-słowie.
+    
+    Args:
+        words_data: Lista słów z danymi timing z ElevenLabs API
+        segment_start_time: Czas rozpoczęcia segmentu w oryginalnym wideo (w sekundach)
+        timestamp_interval: Interwał znaczników czasu (w sekundach)
+        sentence_timestamps: Czy dodawać znaczniki czasu na początku nowych zdań
+        
+    Returns:
+        str: Transkrypt z granularnymi znacznikami czasu
+    """
+    if not words_data:
+        return "Brak danych do przetworzenia."
+    
+    def format_time(seconds):
+        """Formatuj czas w formacie [HH:MM:SS] lub [MM:SS]"""
+        total_seconds = int(segment_start_time + seconds)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        secs = total_seconds % 60
+        
+        if hours > 0:
+            return f"[{hours:02d}:{minutes:02d}:{secs:02d}]"
+        else:
+            return f"[{minutes:02d}:{secs:02d}]"
+    
+    def is_sentence_end(text):
+        """Sprawdź czy tekst kończy zdanie"""
+        return text.strip().endswith('.') or text.strip().endswith('!') or text.strip().endswith('?')
+    
+    result_lines = []
+    current_speaker = None
+    current_text = ""
+    current_line_start_time = None
+    last_timestamp_time = 0
+    sentence_ended = False  # Start with False, first timestamp will be added by speaker change
+    
+    for i, token in enumerate(words_data):
+        token_type = token.get("type", "word")
+        speaker_id = token.get("speaker_id", "speaker_0")
+        text = token.get("text", "")
+        start_time = token.get("start", 0)
+        
+        if current_speaker != speaker_id:
+            if current_text.strip():
+                timestamp = format_time(current_line_start_time)
+                result_lines.append(f"{timestamp} - {current_speaker}] {current_text.strip()}")
+                current_text = ""
+            
+            current_speaker = speaker_id
+            current_line_start_time = start_time
+            last_timestamp_time = start_time
+            timestamp = format_time(start_time)
+            current_text = f"[{timestamp} - {speaker_id}] "
+            sentence_ended = False 
+        
+        elif sentence_timestamps and sentence_ended and token_type == "word" and text.strip():
+            if (start_time - last_timestamp_time) >= 2:
+                timestamp = format_time(start_time)
+                current_text += f" {timestamp} "
+                last_timestamp_time = start_time
+            sentence_ended = False
+        
+        elif current_line_start_time is not None and (start_time - last_timestamp_time) >= timestamp_interval:
+            timestamp = format_time(start_time)
+            current_text += f" {timestamp} "
+            last_timestamp_time = start_time
+        
+        if token_type == "word":
+            current_text += text
+            if is_sentence_end(text):
+                sentence_ended = True
+        elif token_type == "spacing":
+            current_text += text
+    
+    if current_text.strip():
+        if current_speaker and current_line_start_time is not None:
+            if not current_text.strip().startswith('['):
+                timestamp = format_time(current_line_start_time)
+                result_lines.append(f"[{timestamp} - {current_speaker}] {current_text.strip()}")
+            else:
+                result_lines.append(current_text.strip())
+        else:
+            result_lines.append(current_text.strip())
+    
+    return "\n".join(result_lines)
+
+
+def transcribe_audio(audio_path, elevenlabs_api_key=None, return_raw_data=False):
     """
     Konwertuje audio na tekst za pomocą ElevenLabs Scribe V1, włączając diariyzację i znaczniki czasu.
 
     Args:
         audio_path: Ścieżka do pliku audio.
         elevenlabs_api_key: Klucz API ElevenLabs.
+        return_raw_data: Czy zwrócić też surowe dane słowo-po-słowie dla granularnych znaczników
 
     Returns:
-        Szczegółowy transkrypt w formacie tekstowym, lub komunikat o błędzie.
+        Szczegółowy transkrypt w formacie tekstowym, lub tuple (transkrypt, raw_data) jeśli return_raw_data=True
     """
     if not elevenlabs_api_key:
         elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
@@ -699,6 +790,7 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
 
         models_to_try = ['scribe_v1']
         transcription_result = None
+        raw_words_data = None
 
         for model in models_to_try:
             try:
@@ -712,8 +804,8 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
 
                     data = {
                         'model_id': model,
-                        'diarize': 'true',  # Włącz diariyzację (identyfikację mówców)
-                        'timestamps_granularity': 'word'  # Znaczniki czasu na poziomie słów
+                        'diarize': 'true',
+                        'timestamps_granularity': 'word' 
                     }
 
                     logger.info(f"Wysyłanie {audio_path} do ElevenLabs Scribe ({model}) z HTTP API...")
@@ -727,6 +819,8 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                     logger.info(f"Odpowiedź ElevenLabs ({model}): {json.dumps(result, indent=2, ensure_ascii=False)}")
 
                     if isinstance(result, dict) and "words" in result and result["words"]:
+                        raw_words_data = result["words"]
+                        
                         formatted_transcript = []
                         current_speaker = None
                         current_segment_text = ""
@@ -766,6 +860,8 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                             transcription_result = "W tym segmencie nie wykryto mowy."
                             continue
                     elif isinstance(result, list) and len(result) > 0:
+                        raw_words_data = result
+                        
                         formatted_transcript = []
                         current_speaker = None
                         current_segment_text = ""
@@ -834,13 +930,18 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None):
                 transcription_result = f"Błąd krytyczny podczas rozpoznawania mowy: {str(e)}"
                 continue 
 
+        if return_raw_data:
+            return transcription_result, raw_words_data
         return transcription_result
 
     except Exception as e:
         logger.error(f"Wystąpił wyjątek podczas rozpoznawania mowy przez ElevenLabs: {e}")
         import traceback
         logger.error(f"Stos błędów: {traceback.format_exc()}")
-        return f"Błąd krytyczny podczas rozpoznawania mowy: {str(e)}"
+        error_msg = f"Błąd krytyczny podczas rozpoznawania mowy: {str(e)}"
+        if return_raw_data:
+            return error_msg, None
+        return error_msg
 
 
 def analyze_video_content(video_path, openai_api_key=None, frames_count=1, timestamps=False, segment_start_time=0):
@@ -1029,7 +1130,7 @@ Informacje techniczne o wideo:
         return f"Błąd podczas analizy zawartości wideo: {str(e)}"
 
 
-def generate_detailed_markdown_report(segment_info, transcript, visual_analysis, video_path, segment_duration=200, frames_per_segment=1):
+def generate_detailed_markdown_report(segment_info, transcript, visual_analysis, video_path, segment_duration=200, frames_per_segment=1, granular_transcript=None):
     """
     Generuje szczegółowy raport w formacie Markdown z wszystkimi wynikami analizy wideo.
 
@@ -1117,6 +1218,8 @@ def generate_detailed_markdown_report(segment_info, transcript, visual_analysis,
 ### 📝 Transkrypcja Oryginalna
 {transcript if transcript and transcript.strip() else "*Brak transkrypcji - sprawdź konfigurację API ElevenLabs*"}
 
+### ⏰ Transkrypcja z Granularnymi Znacznikami Czasu
+{granular_transcript if granular_transcript and granular_transcript.strip() and granular_transcript != transcript else "*Granularny transkrypt nie został wygenerowany lub jest identyczny z oryginalnym*"}
 
 ### 📊 Statystyki Transkrypcji
 | Metryka | Wartość |
@@ -1182,8 +1285,23 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
 
     if 'mp3_path' in segment_info:
         logger.info(f"Rozpoczynam przetwarzanie audio: {segment_info['mp3_path']}")
-        transcript = transcribe_audio(segment_info['mp3_path'], elevenlabs_api_key)
+        
+        transcript, raw_words = transcribe_audio(segment_info['mp3_path'], elevenlabs_api_key, return_raw_data=True)
         result['transcript'] = transcript
+        
+        if raw_words:
+            logger.info("Generuję transkrypt z granularnymi znacznikami czasu...")
+            segment_start_time = segment_info.get('start_time', 0)
+            granular_transcript = create_granular_transcript(
+                raw_words, 
+                segment_start_time, 
+                timestamp_interval=10, 
+                sentence_timestamps=True
+            )
+            result['granular_transcript'] = granular_transcript
+            logger.info(f"Wygenerowano granularny transkrypt o długości {len(granular_transcript)} znaków")
+        else:
+            result['granular_transcript'] = transcript
     if 'mp4_path' in segment_info and not skip_video_analysis:
         logger.info(f"Rozpoczynam analizę zawartości wideo: {segment_info['mp4_path']}, wyodrębnianie {frames_per_segment} klatek")
         visual_analysis = analyze_video_content(segment_info['mp4_path'], openai_api_key, frames_per_segment, timestamps, segment_info.get('start_time', 0))
@@ -1203,7 +1321,8 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
             result.get('visual_analysis'),
             video_path or segment_info.get('mp4_path', ''),
             segment_duration,
-            frames_per_segment
+            frames_per_segment,
+            result.get('granular_transcript')
         )
 
         with open(result_path, 'w', encoding='utf-8') as f:
