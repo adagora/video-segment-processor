@@ -9,11 +9,10 @@ import logging
 import warnings
 import requests
 import subprocess
-import tempfile
-from pathlib import Path
 import argparse
 from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qs
+from report_generator import create_comprehensive_video_report
 
 warnings.filterwarnings("ignore")
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -1084,7 +1083,19 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                 "content": [
                     {
                         "type": "text",
-                        "text": "Proszę szczegółowo przeanalizować zawartość tego fragmentu wideo, w tym scenę, postacie, działania, atmosferę i elementy wizualne. Proszę opisać w języku polskim."
+                        "text": """Przeanalizuj dokładnie załączony obraz będący slajdem prezentacji i wypisz wszystkie możliwe informacje w formie szczegółowej listy punktowanej. Uwzględnij:
+
+Tytuł i nagłówki – rozpoznaj główny nagłówek slajdu.
+
+Struktura treści – odczytaj wszystkie numery, nazwy punktów agendy, kolejność i język (w tym polskie znaki).
+
+Logo i branding – wskaż obecność logotypu (litera W = logo firmy Acme).
+
+Dodatkowe szczegóły – np. wszelkie napisy w stopce, znaki wodne, metadane lub informacje techniczne widoczne na obrazie.
+
+Interpretacja treści – wyjaśnij, czego dotyczy agenda (np. nowe produkty, technologie, funkcje).
+
+Zadbaj, aby wynik był pełną, precyzyjną i uporządkowaną listą punktów, nie pomijając żadnych detali, nawet drobnych elementów graficznych."""
                     }
                 ]
             }
@@ -1114,11 +1125,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
 Analiza wizualna fragmentu wideo (ID: {segment_id}):
 
 {analysis}
-
-Informacje techniczne o wideo:
-- Całkowity czas trwania: {duration:.2f} sekund
-- Liczba analizowanych klatek: {len(frame_paths)} klatek
-- Model analizy: OpenAI GPT-4o
         """
 
         return formatted_analysis
@@ -1130,133 +1136,7 @@ Informacje techniczne o wideo:
         return f"Błąd podczas analizy zawartości wideo: {str(e)}"
 
 
-def generate_detailed_markdown_report(segment_info, transcript, visual_analysis, video_path, segment_duration=200, frames_per_segment=1, granular_transcript=None):
-    """
-    Generuje szczegółowy raport w formacie Markdown z wszystkimi wynikami analizy wideo.
 
-    Args:
-        segment_info: Informacje o segmencie wideo
-        transcript: Oryginalna transkrypcja audio
-        visual_analysis: Analiza wizualna zawartości wideo
-        video_path: Ścieżka do oryginalnego pliku wideo
-
-    Returns:
-        str: Zawartość raportu w formacie Markdown
-    """
-    import datetime
-
-    video_name = os.path.basename(video_path)
-    video_dir = os.path.dirname(video_path)
-    segment_index = segment_info.get('index', 0)
-    start_time = segment_info.get('start_time', 0)
-    end_time = segment_info.get('end_time', 0)
-    duration = segment_info.get('duration', 0)
-
-    def format_time(seconds):
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-        else:
-            return f"{minutes:02d}:{secs:02d}"
-
-    start_time_formatted = format_time(start_time)
-    end_time_formatted = format_time(end_time)
-    duration_formatted = format_time(duration)
-
-    try:
-        result = subprocess.run(
-            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        total_duration = float(result.stdout.strip())
-        total_duration_formatted = format_time(total_duration)
-    except:
-        total_duration_formatted = "Nieznany"
-
-    mp4_path = segment_info.get('mp4_path', '')
-    mp3_path = segment_info.get('mp3_path', '')
-
-    report = f"""# 📹 Raport Analizy Segmentu Wideo
-
-## 📋 Informacje Ogólne
-
-| Parametr | Wartość |
-|----------|---------|
-| **Nazwa pliku wideo** | `{video_name}` |
-| **Ścieżka wideo** | `{video_path}` |
-| **Data i czas analizy** | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} |
-| **Całkowity czas trwania wideo** | {total_duration_formatted} |
-
-## 🎬 Informacje o Segmencie
-
-| Parametr | Wartość |
-|----------|---------|
-| **Numer segmentu** | {segment_index + 1} |
-| **Czas rozpoczęcia** | {start_time_formatted} ({start_time:.2f}s) |
-| **Czas zakończenia** | {end_time_formatted} ({end_time:.2f}s) |
-| **Czas trwania segmentu** | {duration_formatted} ({duration:.2f}s) |
-| **Pozycja w wideo** | {start_time_formatted} - {end_time_formatted} |
-
-## 📁 Pliki Segmentu
-
-### Plik Wideo
-- **Ścieżka**: `{mp4_path}`
-- **Rozmiar**: {os.path.getsize(mp4_path) if os.path.exists(mp4_path) else 'Nieznany'} bajtów
-- **Format**: MP4 (segment wideo)
-
-### Plik Audio
-- **Ścieżka**: `{mp3_path}`
-- **Rozmiar**: {os.path.getsize(mp3_path) if os.path.exists(mp3_path) else 'Nieznany'} bajtów
-- **Format**: MP3 (wyodrębniony dźwięk)
-
----
-
-## 🎵 Analiza Audio - Transkrypcja
-
-### 📝 Transkrypcja Oryginalna
-{transcript if transcript and transcript.strip() else "*Brak transkrypcji - sprawdź konfigurację API ElevenLabs*"}
-
-### ⏰ Transkrypcja z Granularnymi Znacznikami Czasu
-{granular_transcript if granular_transcript and granular_transcript.strip() and granular_transcript != transcript else "*Granularny transkrypt nie został wygenerowany lub jest identyczny z oryginalnym*"}
-
-### 📊 Statystyki Transkrypcji
-| Metryka | Wartość |
-|---------|---------|
-| **Długość oryginalnego tekstu** | {len(transcript) if transcript else 0} znaków |
-| **Model transkrypcji** | ElevenLabs Scribe V1 |
-
----
-
-## 👁️ Analiza Wizualna Zawartości Wideo
-
-### 📸 Opis Wizualny
-{visual_analysis if visual_analysis and not visual_analysis.startswith("Nie") else "*Brak analizy wizualnej - sprawdź konfigurację API OpenAI*"}
-
-
-### 🔍 Szczegóły Analizy Wizualnej
-| Parametr | Wartość |
-|----------|---------|
-| **Model analizy** | OpenAI GPT-4o Vision |
-| **Liczba klatek analizowanych** | {len([f for f in os.listdir(video_dir) if f.startswith(f"{os.path.splitext(video_name)[0]}_keyframe")]) if os.path.exists(video_dir) else 0} |
-| **Język opisu** | Polski |
-| **Głębokość analizy** | Szczegółowa (scena, postacie, działania, atmosfera) |
-
----
-
-## 🏗️ Analiza Techniczna
-
-### ⚙️ Parametry Przetwarzania
-| Parametr | Wartość |
-|----------|---------|
-| **Długość segmentu** | {segment_duration}s (z konfiguracji) |
-| **Liczba klatek na segment** | {frames_per_segment} (z konfiguracji) |
-
-*Data generowania: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
-"""
-
-    return report
 
 
 def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, frames_per_segment=1, segment_duration=200, video_path=None, timestamps=False):
@@ -1279,8 +1159,7 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
     result = {
         'segment_info': segment_info,
         'transcript': None,
-        'visual_analysis': None,
-        'combined_result_path': None
+        'visual_analysis': None
     }
 
     if 'mp3_path' in segment_info:
@@ -1313,30 +1192,12 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
     output_dir = os.path.dirname(segment_info.get('mp4_path', ''))
     if output_dir:
         segment_name = os.path.splitext(os.path.basename(segment_info.get('mp4_path', '')))[0]
-        result_path = os.path.join(output_dir, f"{segment_name}_analysis.md")
-
-        markdown_content = generate_detailed_markdown_report(
-            segment_info,
-            result.get('transcript'),
-            result.get('visual_analysis'),
-            video_path or segment_info.get('mp4_path', ''),
-            segment_duration,
-            frames_per_segment,
-            result.get('granular_transcript')
-        )
-
-        with open(result_path, 'w', encoding='utf-8') as f:
-            f.write(markdown_content)
-
-        result['combined_result_path'] = result_path
-        logger.info(f"Wyniki przetwarzania zostały zapisane do: {result_path}")
-
         json_result_path = os.path.join(output_dir, f"{segment_name}_result.json")
         with open(json_result_path, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
         result['json_result_path'] = json_result_path
-        logger.info(f"Wyniki JSON zostały zapisane do: {json_result_path}")
+        logger.info(f"Wyniki JSON segmentu zostały zapisane do: {json_result_path}")
 
     return result
 
@@ -1438,6 +1299,22 @@ def main():
         result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis, frames_per_segment, segment_duration=segment_duration, video_path=video_path, timestamps=timestamps_enabled)
         results.append(result)
 
+    logger.info("Rozpoczynam generowanie kompleksowego raportu z wszystkich segmentów...")
+    comprehensive_report_path = create_comprehensive_video_report(
+        results, 
+        video_path, 
+        output_dir,
+        segment_duration, 
+        frames_per_segment
+    )
+    
+    if comprehensive_report_path:
+        logger.info(f"Kompleksowy raport został zapisany do: {comprehensive_report_path}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Kompleksowy raport wygenerowany: {comprehensive_report_path}")
+    else:
+        logger.error("Nie udało się wygenerować kompleksowego raportu")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Błąd podczas generowania kompleksowego raportu")
+
     if RAGFLOW_API_KEY:
         logger.info(f"Rozpoczynam przesyłanie wyników do RAGFlow, nazwa zbioru danych: {dataset_name}")
 
@@ -1464,22 +1341,20 @@ def main():
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Nie można zweryfikować konfiguracji grafu wiedzy zbioru danych: {config_result.get('error')}")
 
         document_ids = []
-        for result in results:
-            if 'combined_result_path' in result and result['combined_result_path']:
-                file_path = result['combined_result_path']
-                file_name = os.path.basename(file_path)
-
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Przesyłanie dokumentu z wynikami analizy: {file_name}")
-                document_id = upload_file_to_ragflow(dataset_id, file_name, file_path, auto_parse=False)
-                if document_id:
-                    update_success = update_document_parser_config(dataset_id, document_id)
-                    if update_success:
-                        document_ids.append(document_id)
-                        print(
-                            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Dokument {file_name} (ID: {document_id}) został dodany do kolejki parsowania")
-                    else:
-                        print(
-                            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ostrzeżenie: Aktualizacja konfiguracji parsowania dla dokumentu {file_name} (ID: {document_id}) nie powiodła się")
+        
+        if comprehensive_report_path and os.path.exists(comprehensive_report_path):
+            comprehensive_report_name = os.path.basename(comprehensive_report_path)
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Przesyłanie kompleksowego raportu: {comprehensive_report_name}")
+            comprehensive_doc_id = upload_file_to_ragflow(dataset_id, comprehensive_report_name, comprehensive_report_path, auto_parse=False)
+            if comprehensive_doc_id:
+                update_success = update_document_parser_config(dataset_id, comprehensive_doc_id)
+                if update_success:
+                    document_ids.append(comprehensive_doc_id)
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Kompleksowy raport (ID: {comprehensive_doc_id}) został dodany do kolejki parsowania")
+                else:
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ostrzeżenie: Aktualizacja konfiguracji parsowania dla kompleksowego raportu nie powiodła się")
+        else:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ Kompleksowy raport nie został wygenerowany, pomijanie przesyłania")
 
         if document_ids:
             logger.info(f"Rozpoczynam wsadowe uruchamianie parsowania wszystkich dokumentów, liczba dokumentów: {len(document_ids)}")
