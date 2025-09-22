@@ -590,9 +590,8 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
             logger.info(f"Wyodrębnianie segmentu wideo {i + 1}/{num_segments}: {start_time:.2f}s - {end_time:.2f}s")
             
             if timestamps:
-                base_name = os.path.basename(video_path)
-                
-                # Format: "video.mp4 [01:00] + PTS" gdzie [01:00] to start_time a PTS to offset
+
+                # Format: Show absolute timestamp from original video
                 hours = int(start_time // 3600)
                 minutes = int((start_time % 3600) // 60)
                 seconds = int(start_time % 60)
@@ -603,7 +602,8 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
                     start_time_str = f"{minutes:02d}:{seconds:02d}"
                 
                 start_time_str_escaped = start_time_str.replace(":", "\\:")
-                text = f"{base_name} {start_time_str_escaped}+%{{pts\\:hms}}"
+                # Use absolute time + PTS offset to show current timestamp in video
+                text = f"%{{pts\\:gmtime\\:{int(start_time)}\\:%H\\:%M\\:%S}}"
                 draw_filter = (
                     f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
                     f":text='{text}':x=w-tw-10:y=h-th-10"
@@ -993,8 +993,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                 middle_time = duration / 2
 
                 if timestamps:
-                    base_name = os.path.basename(video_path)
-                    
                     actual_time = segment_start_time + middle_time
                     
                     hours = int(actual_time // 3600)
@@ -1007,7 +1005,7 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                         time_str = f"{minutes:02d}:{seconds:02d}"
                     
                     time_str_escaped = time_str.replace(":", "\\:")
-                    text = f"{base_name} {time_str_escaped}"
+                    text = f"{time_str_escaped}"
                     draw_filter = (
                         f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
                         f":text='{text}':x=w-tw-10:y=h-th-10"
@@ -1036,7 +1034,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                                               f"{os.path.splitext(os.path.basename(video_path))[0]}_keyframe_{i+1}.jpg")
 
                     if timestamps:
-                        base_name = os.path.basename(video_path)
                         
                         actual_time = segment_start_time + frame_time
                         
@@ -1050,7 +1047,7 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                             time_str = f"{minutes:02d}:{seconds:02d}"
                         
                         time_str_escaped = time_str.replace(":", "\\:")
-                        text = f"{base_name} {time_str_escaped}"
+                        text = f"{time_str_escaped}"
                         draw_filter = (
                             f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
                             f":text='{text}':x=w-tw-10:y=h-th-10"
