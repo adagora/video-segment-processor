@@ -192,8 +192,8 @@ def verify_dataset_graphrag_config(dataset_id):
                 logger.info(f"📊 Weryfikacja konfiguracji grafu wiedzy dla zbioru {dataset_id}:")
                 logger.info(f"   - Metoda chunkowania: {chunk_method}")
                 logger.info(f"   - Parser ID: {parser_id}")
-                logger.info(f"   - Konfiguracja GraphRAG: {'✅ Włączona' if is_graphrag_enabled else '❌ Wyłączona'}")
-                logger.info(f"   - Funkcja grafu wiedzy: {'✅ Włączona' if is_kg_dataset else '❌ Wyłączona'}")
+                logger.info(f"   - Konfiguracja GraphRAG: {'Włączona' if is_graphrag_enabled else 'Wyłączona'}")
+                logger.info(f"   - Funkcja grafu wiedzy: {'Włączona' if is_kg_dataset else 'Wyłączona'}")
 
                 if is_kg_dataset:
                     method = graphrag_config.get("method", "unknown")
@@ -313,17 +313,17 @@ def wait_for_documents_parsing(dataset_id, document_ids, check_interval=30):
 
             if chunk_count > 0:
                 completed_docs.add(doc_id)
-                print(f"✅ Dokument {doc_id} przetworzony (liczba chunków: {chunk_count})")
+                print(f"Dokument {doc_id} przetworzony (liczba chunków: {chunk_count})")
             elif status_info.get("status") in ["ERROR", "NOT_FOUND"]:
                 failed_docs.add(doc_id)
-                print(f"❌ Dokument {doc_id} nie został przetworzony")
+                print(f"Dokument {doc_id} nie został przetworzony")
 
 
         remaining = len(document_ids) - len(completed_docs) - len(failed_docs)
-        print(f"⏱️  Czas oczekiwania: {format_time(elapsed_time)} | "
-              f"✅ Zakończone: {len(completed_docs)} | "
-              f"❌ Nieudane: {len(failed_docs)} | "
-              f"⏳ Oczekujące: {remaining}")
+        print(f"Czas oczekiwania: {format_time(elapsed_time)} | "
+              f"Zakończone: {len(completed_docs)} | "
+              f"Nieudane: {len(failed_docs)} | "
+              f"Oczekujące: {remaining}")
 
         if len(completed_docs) + len(failed_docs) == len(document_ids):
             print(f"\n{'=' * 60}")
@@ -343,10 +343,10 @@ def wait_for_documents_parsing(dataset_id, document_ids, check_interval=30):
         "elapsed_time": time.time() - start_time
     }
 
-    print(f"📊 Statystyki przetwarzania:")
+    print(f" Statystyki przetwarzania:")
     print(f"   Liczba dokumentów: {result['total']}")
-    print(f"   Przetworzone pomyślnie: {result['completed']} ✅")
-    print(f"   Nieudane: {result['failed']} ❌")
+    print(f"   Przetworzone pomyślnie: {result['completed']} ")
+    print(f"   Nieudane: {result['failed']} ")
     print(f"   Całkowity czas: {format_time(result['elapsed_time'])}")
 
     if result['failed'] > 0:
@@ -446,8 +446,8 @@ def update_document_parser_config(dataset_id, document_id):
         if response.status_code == 200:
             result = response.json()
             if result.get("code") == 0:
-                logger.info(f"✅ Pomyślnie zaktualizowano konfigurację parsera dokumentu {document_id}")
-                logger.info(f"🕸️ Funkcja GraphRAG została włączona: {GRAPHRAG_CONFIG}")
+                logger.info(f"Pomyślnie zaktualizowano konfigurację parsera dokumentu {document_id}")
+                logger.info(f"Funkcja GraphRAG została włączona: {GRAPHRAG_CONFIG}")
                 return True
             else:
                 logger.error(f"Nie udało się zaktualizować konfiguracji parsera dokumentu: {result.get('message')}")
@@ -603,10 +603,11 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
                 
                 start_time_str_escaped = start_time_str.replace(":", "\\:")
                 # Use absolute time + PTS offset to show current timestamp in video
+                original_name_with_ext = os.path.basename(video_path)
                 text = f"%{{pts\\:gmtime\\:{int(start_time)}\\:%H\\:%M\\:%S}}"
                 draw_filter = (
-                    f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
-                    f":text='{text}':x=w-tw-10:y=h-th-10"
+                    f"drawtext=fontcolor=yellow:fontsize=36:box=1:boxcolor=black@0.8:boxborderw=4"
+                    f":text='{original_name_with_ext} {text}':x=w-tw-20:y=h-th-20"
                 )
                 
                 logger.info(f"Dodawanie znaczników czasu do segmentu wideo (bazowy czas: {start_time_str}) z filtrem drawtext")
@@ -1005,10 +1006,11 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                         time_str = f"{minutes:02d}:{seconds:02d}"
                     
                     time_str_escaped = time_str.replace(":", "\\:")
-                    text = f"{time_str_escaped}"
+                    original_name_with_ext = os.path.basename(video_path)
+                    text = f"{original_name_with_ext} {time_str_escaped}"
                     draw_filter = (
-                        f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
-                        f":text='{text}':x=w-tw-10:y=h-th-10"
+                        f"drawtext=fontcolor=yellow:fontsize=36:box=1:boxcolor=black@0.8:boxborderw=4"
+                        f":text='{text}':x=w-tw-20:y=h-th-20"
                     )
                     
                     subprocess.run([
@@ -1047,10 +1049,11 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                             time_str = f"{minutes:02d}:{seconds:02d}"
                         
                         time_str_escaped = time_str.replace(":", "\\:")
-                        text = f"{time_str_escaped}"
+                        original_name_with_ext = os.path.basename(video_path)
+                        text = f"{original_name_with_ext} {time_str_escaped}"
                         draw_filter = (
-                            f"drawtext=fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5"
-                            f":text='{text}':x=w-tw-10:y=h-th-10"
+                            f"drawtext=fontcolor=yellow:fontsize=36:box=1:boxcolor=black@0.8:boxborderw=4"
+                            f":text='{text}':x=w-tw-20:y=h-th-20"
                         )
                         
                         subprocess.run([
@@ -1207,9 +1210,27 @@ def main():
     
     load_environment_config()
     
-    video_paths = [
-        '/home/zy/ragflow/1101732139-1-208.mp4'
-    ]
+    # Auto-discover videos from video_input folder
+    video_input_dir = os.path.join(os.path.dirname(__file__), 'video_input')
+    video_paths = []
+    
+    if os.path.exists(video_input_dir):
+        # Supported video formats
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v')
+        for file in os.listdir(video_input_dir):
+            if file.lower().endswith(video_extensions):
+                video_paths.append(os.path.join(video_input_dir, file))
+        
+        if video_paths:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Znaleziono {len(video_paths)} plików wideo w katalogu video_input:")
+            for path in video_paths:
+                print(f"  - {os.path.basename(path)}")
+        else:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Brak plików wideo w katalogu video_input")
+    else:
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Katalog video_input nie istnieje - zostanie utworzony")
+        os.makedirs(video_input_dir, exist_ok=True)
+    
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja ścieżek wideo zakończona: {len(video_paths)} plików wideo")
 
     output_dir = os.getenv('OUTPUT_DIR', './video_segments')
@@ -1249,6 +1270,7 @@ def main():
 
         if args.video:
             video_paths = [args.video]
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Używam ręcznie określonego pliku wideo: {args.video}")
 
         if args.timestamps:
             timestamps_enabled = True
@@ -1273,141 +1295,105 @@ def main():
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Rozpoczynam przetwarzanie wideo...")
 
     if not video_paths:
-        logger.error("Nie podano ścieżki do wideo, program zostanie zakończony")
+        logger.error("Brak plików wideo do przetworzenia. Umieść pliki .mp4, .avi, .mov itp. w katalogu video_input/")
         return
 
-    video_path_raw = video_paths[0]
-    video_path, video_options = parse_video_path_with_params(video_path_raw)
+    all_document_ids = []
     
-    timestamps_enabled = timestamps_enabled or video_options.get("timestamps", False)
-    
-    if timestamps_enabled:
-        logger.info("✅ Funkcja znaczników czasu jest włączona")
-    else:
-        logger.info("ℹ️ Funkcja znaczników czasu jest wyłączona")
-
-    logger.info(f"Rozpoczynam przetwarzanie wideo: {video_path}")
-    segments = segment_video(video_path, output_dir, segment_duration, timestamps_enabled)
-
-    if not segments:
-        logger.error("Segmentacja wideo nie powiodła się, program zostanie zakończony")
-        return
-
-    results = []
-    for segment in segments:
-        logger.info(f"Rozpoczynam przetwarzanie segmentu {segment['index'] + 1}/{len(segments)}")
-        result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis, frames_per_segment, segment_duration=segment_duration, video_path=video_path, timestamps=timestamps_enabled)
-        results.append(result)
-
-    logger.info("Rozpoczynam generowanie kompleksowego raportu z wszystkich segmentów...")
-    comprehensive_report_path = create_comprehensive_video_report(
-        results, 
-        video_path, 
-        output_dir,
-        segment_duration, 
-        frames_per_segment
-    )
-    
-    if comprehensive_report_path:
-        logger.info(f"Kompleksowy raport został zapisany do: {comprehensive_report_path}")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Kompleksowy raport wygenerowany: {comprehensive_report_path}")
-    else:
-        logger.error("Nie udało się wygenerować kompleksowego raportu")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Błąd podczas generowania kompleksowego raportu")
-
-    if RAGFLOW_API_KEY:
-        logger.info(f"Rozpoczynam przesyłanie wyników do RAGFlow, nazwa zbioru danych: {dataset_name}")
-
-        dataset_id = get_dataset_by_name(dataset_name)
-
-        if not dataset_id:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Zbiór danych nie istnieje, próba utworzenia nowego zbioru danych...")
-            dataset_id = create_ragflow_dataset(dataset_name)
-            if not dataset_id:
-                logger.error("Nie udało się utworzyć zbioru danych RAGFlow, nie można kontynuować")
-                return
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Pomyślnie utworzono zbiór danych RAGFlow")
-        else:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Znaleziono istniejący zbiór danych, ID: {dataset_id}, zostanie on użyty bezpośrednio")
-
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🔍 Weryfikacja konfiguracji grafu wiedzy zbioru danych...")
-        config_result = verify_dataset_graphrag_config(dataset_id)
-        if config_result["success"]:
-            if config_result["enabled"]:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ✅ Funkcja grafu wiedzy dla zbioru danych jest poprawnie włączona")
-            else:
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ Ostrzeżenie: Funkcja grafu wiedzy dla zbioru danych nie jest włączona, co może wpłynąć na działanie asystenta")
-        else:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ❌ Nie można zweryfikować konfiguracji grafu wiedzy zbioru danych: {config_result.get('error')}")
-
-        document_ids = []
+    # Process each video
+    for video_index, video_path_raw in enumerate(video_paths):
+        print(f"\n{'='*80}")
+        print(f"Przetwarzanie wideo {video_index + 1}/{len(video_paths)}: {os.path.basename(video_path_raw)}")
+        print(f"{'='*80}")
         
-        if comprehensive_report_path and os.path.exists(comprehensive_report_path):
-            comprehensive_report_name = os.path.basename(comprehensive_report_path)
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Przesyłanie kompleksowego raportu: {comprehensive_report_name}")
-            comprehensive_doc_id = upload_file_to_ragflow(dataset_id, comprehensive_report_name, comprehensive_report_path, auto_parse=False)
-            if comprehensive_doc_id:
-                update_success = update_document_parser_config(dataset_id, comprehensive_doc_id)
-                if update_success:
-                    document_ids.append(comprehensive_doc_id)
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Kompleksowy raport (ID: {comprehensive_doc_id}) został dodany do kolejki parsowania")
-                else:
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Ostrzeżenie: Aktualizacja konfiguracji parsowania dla kompleksowego raportu nie powiodła się")
+        video_path, video_options = parse_video_path_with_params(video_path_raw)
+        video_timestamps_enabled = timestamps_enabled or video_options.get("timestamps", False)
+        
+        if video_timestamps_enabled:
+            logger.info("✅ Funkcja znaczników czasu jest włączona")
         else:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ Kompleksowy raport nie został wygenerowany, pomijanie przesyłania")
+            logger.info("ℹ️ Funkcja znaczników czasu jest wyłączona")
 
-        if document_ids:
-            logger.info(f"Rozpoczynam wsadowe uruchamianie parsowania wszystkich dokumentów, liczba dokumentów: {len(document_ids)}")
-            success_count = 0
+        # Create separate output directory for each video
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        video_output_dir = os.path.join(output_dir, video_name)
+        os.makedirs(video_output_dir, exist_ok=True)
+
+        logger.info(f"Rozpoczynam przetwarzanie wideo: {video_path}")
+        logger.info(f"Katalog wyjściowy: {video_output_dir}")
+        
+        segments = segment_video(video_path, video_output_dir, segment_duration, video_timestamps_enabled)
+
+        if not segments:
+            logger.error(f"Segmentacja wideo {video_path} nie powiodła się, pomijanie")
+            continue
+
+        results = []
+        for segment in segments:
+            logger.info(f"Rozpoczynam przetwarzanie segmentu {segment['index'] + 1}/{len(segments)}")
+            result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis, frames_per_segment, segment_duration=segment_duration, video_path=video_path, timestamps=video_timestamps_enabled)
+            results.append(result)
+
+        logger.info("Rozpoczynam generowanie kompleksowego raportu z wszystkich segmentów...")
+        comprehensive_report_path = create_comprehensive_video_report(
+            results, 
+            video_path, 
+            video_output_dir,
+            segment_duration, 
+            frames_per_segment
+        )
+        
+        if comprehensive_report_path and RAGFLOW_API_KEY:
+            # Upload this video's report to RAGFlow
+            dataset_id = get_dataset_by_name(dataset_name)
+            if not dataset_id:
+                dataset_id = create_ragflow_dataset(dataset_name)
+            
+            if dataset_id and os.path.exists(comprehensive_report_path):
+                comprehensive_report_name = os.path.basename(comprehensive_report_path)
+                comprehensive_doc_id = upload_file_to_ragflow(dataset_id, comprehensive_report_name, comprehensive_report_path, auto_parse=False)
+                if comprehensive_doc_id:
+                    update_document_parser_config(dataset_id, comprehensive_doc_id)
+                    all_document_ids.append(comprehensive_doc_id)
+
+    # Process all uploaded documents at once
+    if RAGFLOW_API_KEY and all_document_ids:
+        logger.info(f"Rozpoczynam wsadowe uruchamianie parsowania wszystkich dokumentów, liczba dokumentów: {len(all_document_ids)}")
+        
+        dataset_id = get_dataset_by_name(dataset_name)
+        if dataset_id:
             triggered_doc_ids = []
-            for doc_id in document_ids:
+            for doc_id in all_document_ids:
                 parse_success = parse_documents(dataset_id, [doc_id])
                 if parse_success:
-                    success_count += 1
                     triggered_doc_ids.append(doc_id)
-                    logger.info(f"Uruchomienie parsowania dokumentu {doc_id} powiodło się")
-                else:
-                    logger.warning(f"Uruchomienie parsowania dokumentu {doc_id} nie powiodło się")
                 time.sleep(0.5)
 
-            logger.info(f"Uruchomiono parsowanie dla {success_count}/{len(document_ids)} dokumentów")
-
             if triggered_doc_ids:
-                logger.info("Rozpoczynam oczekiwanie na zakończenie parsowania dokumentów...")
-                parsing_result = wait_for_documents_parsing(
-                    dataset_id,
-                    triggered_doc_ids,
-                    check_interval=30
-                )
-
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Statystyki zakończenia parsowania dokumentów:")
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Całkowita liczba dokumentów: {parsing_result['total']}")
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Sparsowano pomyślnie: {parsing_result['completed']}")
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Błędy parsowania: {parsing_result['failed']}")
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] - Czas parsowania: {parsing_result['elapsed_time']:.1f} sekund")
-
+                parsing_result = wait_for_documents_parsing(dataset_id, triggered_doc_ids, check_interval=30)
+                print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🎉 Przetwarzanie wszystkich wideo zakończone!")
+                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Liczba przetworzonych wideo: {len(video_paths)}")
+                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Dokumenty RAGFlow: {parsing_result['completed']}/{parsing_result['total']} sparsowane pomyślnie")
                 if parsing_result.get("completed", 0) > 0:
-                    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🎉 Parsowanie dokumentów zakończone!")
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💡 Teraz możesz utworzyć asystenta wideo, uruchamiając następujące polecenie:")
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]    python create_video_assistant.py {dataset_id}")
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 📋 ID zbioru danych: {dataset_id}")
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 💡 ID zbioru danych: {dataset_id}")
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🌐 Interfejs RAGFlow: {RAGFLOW_API_URL}")
 
-                if parsing_result['failed'] > 0:
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ID dokumentów z błędami: {parsing_result['failed_ids']}")
-            else:
-                logger.warning("Nie udało się uruchomić parsowania żadnego dokumentu")
-
-        end_time = time.time()
-        total_time = end_time - start_time
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Wszystkie operacje zakończone!")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Całkowity czas: {total_time:.2f} sekund ({total_time / 60:.2f} minut)")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Przetwarzanie zakończone, przesłano {len(document_ids)} dokumentów do RAGFlow")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ID zbioru danych RAGFlow: {dataset_id}")
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Adres interfejsu RAGFlow: {RAGFLOW_API_URL}")
     else:
         logger.warning("Klucz API RAGFlow nie jest ustawiony, pomijanie kroku przesyłania")
-        logger.info(f"Przetwarzanie zakończone, wyniki zapisane w: {output_dir}")
+
+    end_time = time.time()
+    total_time = end_time - start_time
+    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 🎉 Wszystkie operacje zakończone!")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Całkowity czas: {total_time:.2f} sekund ({total_time / 60:.2f} minut)")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Przetworzono {len(video_paths)} plików wideo")
+    
+    if RAGFLOW_API_KEY:
+        dataset_id = get_dataset_by_name(dataset_name)
+        if dataset_id:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ID zbioru danych: {dataset_id}")
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Interfejs RAGFlow: {RAGFLOW_API_URL}")
+    else:
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Wyniki zapisane w katalogu: {output_dir}")
 
 
 if __name__ == '__main__':

@@ -35,13 +35,13 @@ choco install ffmpeg or winget install "FFmpeg (Essentials Build)" (windows)
 python video_segment_processor.py --video "Nowości 2025- Modest Ligfht.mp4" --segment-duration 60
 ```
 
-
 ## Other
 ```
 ffprobe -v quiet -print_format json -show_format -show_streams "Nowości 2025- Modest Ligfht_segment_0.mp3"
 ```
+
 ## Timestamp
 ```
-cd /c/AI_projects/VideoProcessor && python video_segment_processor.py --video "Nowości 2025- Modest Ligfht.mp4?timestamps=1" --segment-duration 60
+python video_segment_processor.py --video "video_input\Szablon prezentacji Bezpieczeństwo 1 — no password manager.mp4" --timestamps --segment-duration 60
 ```
 
