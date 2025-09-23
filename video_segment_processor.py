@@ -591,7 +591,6 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
             
             if timestamps:
 
-                # Format: Show absolute timestamp from original video
                 hours = int(start_time // 3600)
                 minutes = int((start_time % 3600) // 60)
                 seconds = int(start_time % 60)
@@ -602,7 +601,6 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
                     start_time_str = f"{minutes:02d}:{seconds:02d}"
                 
                 start_time_str_escaped = start_time_str.replace(":", "\\:")
-                # Use absolute time + PTS offset to show current timestamp in video
                 original_name_with_ext = os.path.basename(video_path)
                 text = f"%{{pts\\:gmtime\\:{int(start_time)}\\:%H\\:%M\\:%S}}"
                 draw_filter = (
@@ -944,16 +942,17 @@ def transcribe_audio(audio_path, elevenlabs_api_key=None, return_raw_data=False)
         return error_msg
 
 
-def analyze_video_content(video_path, openai_api_key=None, frames_count=1, timestamps=False, segment_start_time=0):
+def analyze_video_content(video_path, openai_api_key=None, frames_count=1, timestamps=False, segment_start_time=0, output_dir=None):
     """
-    Analizuje zawartość wideo za pomocą modelu OpenAI Vision.
+    Analizuje zawartość wideo za pomocą modelu OpenAI Vision, z ulepszoną detekcją unikalnych slajdów via FFmpeg scene detection.
 
     Args:
-        video_path: Ścieżka do pliku wideo.
+        video_path: Ścieżka do pliku wideo (segmentu).
         segment_start_time: Czas rozpoczęcia segmentu w oryginalnym wideo (w sekundach).
         openai_api_key: Klucz API OpenAI.
-        frames_count: Liczba klatek kluczowych do wyodrębnienia, domyślnie 1.
+        frames_count: Maksymalna liczba klatek kluczowych do wyodrębnienia (domyślnie 1).
         timestamps: Czy dodać znaczniki czasu do wyodrębnianych klatek.
+        output_dir: Opcjonalny katalog do zapisu klatek kluczowych.
 
     Returns:
         Tekst z wynikami analizy.
@@ -965,120 +964,149 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
         logger.warning("Klucz API OpenAI nie jest ustawiony, nie można przeprowadzić analizy zawartości wideo")
         return "Nie przeprowadzono analizy zawartości wideo"
 
-    if frames_count == 1:
-        frames_count = int(os.getenv('FRAMES_PER_SEGMENT', '1'))
+    scene_threshold = float(os.getenv('SCENE_THRESHOLD', '0.01'))  # Lower threshold for more sensitive detection
 
     try:
         from openai import OpenAI
         import base64
+        import re
 
         client = OpenAI(api_key=openai_api_key)
 
         video_name = os.path.basename(video_path)
         segment_id = os.path.splitext(video_name)[0]
 
-        frame_paths = []
-        try:
-            result = subprocess.run(
-                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
-                 'default=noprint_wrappers=1:nokey=1', video_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            duration = float(result.stdout.strip())
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
+             'default=noprint_wrappers=1:nokey=1', video_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        duration = float(result.stdout.strip())
 
-            if frames_count == 1:
-                frame_path = os.path.join(os.path.dirname(video_path),
-                                          f"{os.path.splitext(os.path.basename(video_path))[0]}_keyframe.jpg")
-                middle_time = duration / 2
+        manual_only_mode = os.getenv('MANUAL_SCENES_ONLY') == 'true'
+        
+        scene_times = []
+        
+        if not manual_only_mode:
+            logger.info(f"Automatyczna detekcja zmian scen w {video_path} z progiem {scene_threshold}")
+            
+            scene_cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-filter_complex', f"select='bitor(gt(scene\\,{scene_threshold})\\,eq(n\\,0))',showinfo",
+                '-f', 'null', '-'
+            ]
+            scene_result = subprocess.run(scene_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
-                if timestamps:
-                    actual_time = segment_start_time + middle_time
-                    
-                    hours = int(actual_time // 3600)
-                    minutes = int((actual_time % 3600) // 60)
-                    seconds = int(actual_time % 60)
-                    
-                    if hours > 0:
-                        time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                    else:
-                        time_str = f"{minutes:02d}:{seconds:02d}"
-                    
-                    time_str_escaped = time_str.replace(":", "\\:")
-                    original_name_with_ext = os.path.basename(video_path)
-                    text = f"{original_name_with_ext} {time_str_escaped}"
-                    draw_filter = (
-                        f"drawtext=fontcolor=yellow:fontsize=36:box=1:boxcolor=black@0.8:boxborderw=4"
-                        f":text='{text}':x=w-tw-20:y=h-th-20"
-                    )
-                    
-                    subprocess.run([
-                        'ffmpeg', '-y', '-ss', str(middle_time),
-                        '-i', video_path, '-vframes', '1',
-                        '-vf', draw_filter, '-q:v', '2', frame_path
-                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                else:
-                    subprocess.run([
-                        'ffmpeg', '-y', '-ss', str(middle_time),
-                        '-i', video_path, '-vframes', '1',
-                        '-q:v', '2', frame_path
-                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-                frame_paths = [frame_path]
-                logger.info(f"Pomyślnie wyodrębniono klatkę kluczową: {frame_path}")
+            if scene_result.returncode == 0:
+                for line in scene_result.stdout.splitlines():
+                    if 'n:' in line and 'pts_time:' in line:
+                        pts_match = re.search(r'pts_time:([\d.]+)', line)
+                        if pts_match:
+                            pts_time = float(pts_match.group(1))
+                            if pts_time <= duration:
+                                scene_times.append(pts_time)
             else:
-                interval = duration / (frames_count + 1)  # +1, aby uniknąć ostatniej klatki na samym końcu
-
-                for i in range(frames_count):
-                    frame_time = interval * (i + 1)
-                    frame_path = os.path.join(os.path.dirname(video_path),
-                                              f"{os.path.splitext(os.path.basename(video_path))[0]}_keyframe_{i+1}.jpg")
-
-                    if timestamps:
-                        
-                        actual_time = segment_start_time + frame_time
-                        
-                        hours = int(actual_time // 3600)
-                        minutes = int((actual_time % 3600) // 60)
-                        seconds = int(actual_time % 60)
-                        
-                        if hours > 0:
-                            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                logger.warning(f"FFmpeg scene detection failed, using fallback method")
+                scene_times = [0.0]
+                interval = duration / max(frames_count - 1, 1)
+                for i in range(1, frames_count):
+                    scene_times.append(min(i * interval, duration))
+        else:
+            logger.info(f"Używam tylko ręcznej detekcji scen dla {video_path}")
+        
+        manual_scenes = []
+        
+        manual_times_env = os.getenv('MANUAL_SCENE_TIMES', '')
+        if manual_times_env:
+            try:
+                raw_times = [t.strip() for t in manual_times_env.split(',') if t.strip()]
+                for time_str in raw_times:
+                    if ':' in time_str:
+                        # mm:ss format
+                        parts = time_str.split(':')
+                        if len(parts) == 2:
+                            minutes, seconds = map(float, parts)
+                            manual_scenes.append(minutes * 60 + seconds)
                         else:
-                            time_str = f"{minutes:02d}:{seconds:02d}"
-                        
-                        time_str_escaped = time_str.replace(":", "\\:")
-                        original_name_with_ext = os.path.basename(video_path)
-                        text = f"{original_name_with_ext} {time_str_escaped}"
-                        draw_filter = (
-                            f"drawtext=fontcolor=yellow:fontsize=36:box=1:boxcolor=black@0.8:boxborderw=4"
-                            f":text='{text}':x=w-tw-20:y=h-th-20"
-                        )
-                        
-                        subprocess.run([
-                            'ffmpeg', '-y', '-ss', str(frame_time),
-                            '-i', video_path, '-vframes', '1',
-                            '-vf', draw_filter, '-q:v', '2', frame_path
-                        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            manual_scenes.append(float(time_str))
                     else:
-                        subprocess.run([
-                            'ffmpeg', '-y', '-ss', str(frame_time),
-                            '-i', video_path, '-vframes', '1',
-                            '-q:v', '2', frame_path
-                        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        manual_scenes.append(float(time_str))
+                
+                if manual_only_mode:
+                    logger.info(f"Używam wyłącznie ręcznych scen z MANUAL_SCENE_TIMES: {manual_scenes}")
+                else:
+                    logger.info(f"Dodano sceny z MANUAL_SCENE_TIMES: {manual_scenes}")
+            except ValueError as e:
+                logger.warning(f"Błąd parsowania MANUAL_SCENE_TIMES: {e}")
+        
+        if manual_only_mode:
+            scene_times = manual_scenes
+        else:
+            all_scenes = scene_times + manual_scenes
+            scene_times = sorted(set(all_scenes))
+        
+        filtered_scenes = []
+        for scene in scene_times:
+            if not filtered_scenes or (scene - filtered_scenes[-1]) >= 1.0:
+                filtered_scenes.append(scene)
+        
+        scene_times = filtered_scenes
+        logger.info(f"Wykryto {len(scene_times)} zmian scen w czasie: {scene_times}")
+        
+        selected_times = scene_times.copy()
+        
+        if not selected_times:
+            selected_times = [0.0]
+            logger.info(f"Brak wykrytych scen, użyto klatki początkowej")
+        
+        selected_times = sorted(selected_times)
+        logger.info(f"Będę wyodrębniać {len(selected_times)} klatek kluczowych ze wszystkich wykrytych scen: {selected_times}")
 
-                    frame_paths.append(frame_path)
-                    logger.info(f"Pomyślnie wyodrębniono klatkę kluczową {i+1}/{frames_count}: {frame_path}")
+        frame_paths = []
+        frame_times = []
 
-                logger.info(f"Pomyślnie wyodrębniono {frames_count} klatek kluczowych")
+        frame_dir = output_dir if output_dir else os.path.dirname(video_path)
+        for i, extract_time in enumerate(selected_times):
+            frame_path = os.path.join(frame_dir, f"{segment_id}_keyframe_{i+1}.jpg")
 
-        except Exception as e:
-            logger.error(f"Nie udało się wyodrębnić klatek kluczowych: {e}")
-            return f"Nie udało się wyodrębnić klatek kluczowych: {str(e)}"
+            actual_time = segment_start_time + extract_time
+
+            if timestamps:
+                hours = int(actual_time // 3600)
+                minutes = int((actual_time % 3600) // 60)
+                seconds = int(actual_time % 60)
+                if hours > 0:
+                    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                else:
+                    time_str = f"{minutes:02d}:{seconds:02d}"
+                time_str_escaped = time_str.replace(":", "\\:")
+                original_name_with_ext = os.path.basename(video_path)
+                text = f"{original_name_with_ext} {time_str_escaped}"
+                draw_filter = (
+                    f"drawtext=fontcolor=yellow:fontsize=36:box=1:boxcolor=black@0.8:boxborderw=4"
+                    f":text='{text}':x=w-tw-20:y=h-th-20"
+                )
+                extract_cmd = [
+                    'ffmpeg', '-y', '-ss', str(extract_time),
+                    '-i', video_path, '-vframes', '1',
+                    '-vf', draw_filter, '-q:v', '2', frame_path
+                ]
+            else:
+                extract_cmd = [
+                    'ffmpeg', '-y', '-ss', str(extract_time),
+                    '-i', video_path, '-vframes', '1',
+                    '-q:v', '2', frame_path
+                ]
+
+            subprocess.run(extract_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            frame_paths.append(frame_path)
+            frame_times.append(extract_time)
+            logger.info(f"Wyodrębniono klatkę {i+1}/{len(selected_times)} w czasie {extract_time:.2f}s: {frame_path}")
 
         analyses = []
-        for frame_path in frame_paths:
+        for idx, frame_path in enumerate(frame_paths, 1):
             with open(frame_path, 'rb') as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
 
@@ -1113,19 +1141,19 @@ Zadbaj, aby wynik był pełną, precyzyjną i uporządkowaną listą punktów, n
             ]
 
             response = client.chat.completions.create(
-                model="gpt-4.1",
+                model="gpt-4o",
                 messages=messages,
                 max_tokens=1000
             )
 
             analysis = response.choices[0].message.content
-            analyses.append(f"Analiza klatki {len(analyses) + 1}:\n{analysis}")
+            analyses.append(f"Analiza klatki {idx} (czas: {frame_times[idx-1]:.2f}s):\n{analysis}")
 
         combined_analysis = "\n\n---\n\n".join(analyses)
-        logger.info(f"Analiza przez OpenAI Vision zakończona sukcesem, długość tekstu: {len(combined_analysis)}")
+        logger.info(f"Analiza przez OpenAI Vision zakończona sukcesem, {len(frame_paths)} klatek, długość tekstu: {len(combined_analysis)}")
 
         formatted_analysis = f"""
-Analiza wizualna fragmentu wideo (ID: {segment_id}):
+Analiza wizualna fragmentu wideo (ID: {segment_id}, wykryte slajdy: {len(selected_times)}):
 
 {combined_analysis}
         """
@@ -1139,10 +1167,7 @@ Analiza wizualna fragmentu wideo (ID: {segment_id}):
         return f"Błąd podczas analizy zawartości wideo: {str(e)}"
 
 
-
-
-
-def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, frames_per_segment=1, segment_duration=200, video_path=None, timestamps=False):
+def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, segment_duration=200, video_path=None, timestamps=False):
     """
     Przetwarza pojedynczy segment wideo, w tym transkrypcję mowy na tekst i analizę zawartości wideo.
 
@@ -1151,7 +1176,6 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
         elevenlabs_api_key: Klucz API ElevenLabs.
         openai_api_key: Klucz API OpenAI.
         skip_video_analysis: Czy pominąć analizę zawartości wideo.
-        frames_per_segment: Liczba klatek kluczowych do wyodrębnienia na segment.
         segment_duration: Długość segmentu w sekundach.
         video_path: Ścieżka do oryginalnego pliku wideo.
         timestamps: Czy dodać znaczniki czasu do klatek wideo.
@@ -1185,8 +1209,8 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
         else:
             result['granular_transcript'] = transcript
     if 'mp4_path' in segment_info and not skip_video_analysis:
-        logger.info(f"Rozpoczynam analizę zawartości wideo: {segment_info['mp4_path']}, wyodrębnianie {frames_per_segment} klatek")
-        visual_analysis = analyze_video_content(segment_info['mp4_path'], openai_api_key, frames_per_segment, timestamps, segment_info.get('start_time', 0))
+        logger.info(f"Rozpoczynam analizę zawartości wideo: {segment_info['mp4_path']}")
+        visual_analysis = analyze_video_content(segment_info['mp4_path'], openai_api_key, timestamps=timestamps, segment_start_time=segment_info.get('start_time', 0))
         result['visual_analysis'] = visual_analysis
     elif skip_video_analysis:
         logger.info("Pominięto analizę zawartości wideo")
@@ -1210,12 +1234,10 @@ def main():
     
     load_environment_config()
     
-    # Auto-discover videos from video_input folder
     video_input_dir = os.path.join(os.path.dirname(__file__), 'video_input')
     video_paths = []
     
     if os.path.exists(video_input_dir):
-        # Supported video formats
         video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v')
         for file in os.listdir(video_input_dir):
             if file.lower().endswith(video_extensions):
@@ -1236,10 +1258,9 @@ def main():
     output_dir = os.getenv('OUTPUT_DIR', './video_segments')
     segment_duration = int(os.getenv('SEGMENT_DURATION', '200'))
     dataset_name = os.getenv('DATASET_NAME', 'Video Segments Dataset')
-    frames_per_segment = int(os.getenv('FRAMES_PER_SEGMENT', '1'))
 
     skip_video_analysis = os.getenv('SKIP_VIDEO_ANALYSIS', 'false').lower() == 'true'
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja funkcji: Analiza wideo {'pominięta' if skip_video_analysis else 'włączona'}, {frames_per_segment} klatek na segment")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja funkcji: Analiza wideo {'pominięta' if skip_video_analysis else 'włączona'}")
 
     import logging
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -1257,7 +1278,6 @@ def main():
         parser.add_argument('--video', type=str, help='Ścieżka do pliku wideo')
         parser.add_argument('--output-dir', type=str, default='./video_segments', help='Katalog wyjściowy')
         parser.add_argument('--segment-duration', type=int, default=200, help='Czas trwania segmentu wideo (w sekundach)')
-        parser.add_argument('--frames-per-segment', type=int, default=None, help='Liczba klatek kluczowych do wyodrębnienia na segment')
         parser.add_argument('--dataset-name', type=str, default=None, help='Nazwa zbioru danych RAGFlow')
         parser.add_argument('--ragflow-api-url', type=str, default=None, help='URL API RAGFlow')
         parser.add_argument('--ragflow-api-key', type=str, default=None, help='Klucz API RAGFlow')
@@ -1265,6 +1285,8 @@ def main():
                             help='Włącz analizę zawartości wideo (domyślnie pominięta, wymaga ważnego klucza API)')
         parser.add_argument('--timestamps', action='store_true',
                             help='Dodaj znaczniki czasu do dolnego prawego rogu każdej klatki wideo')
+        parser.add_argument('--manual-scenes', type=str, default=None,
+                            help='Używaj tylko ręcznych znaczników czasu scen zamiast automatycznej detekcji (np. "0:11,2:59,6:11" lub "11,179,371")')
 
         args = parser.parse_args()
 
@@ -1275,12 +1297,16 @@ def main():
         if args.timestamps:
             timestamps_enabled = True
 
+        if args.manual_scenes:
+            manual_scenes_str = args.manual_scenes
+            os.environ['MANUAL_SCENE_TIMES'] = manual_scenes_str
+            os.environ['MANUAL_SCENES_ONLY'] = 'true'  # Flag manual-only mode
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Używam tylko ręcznych znaczników czasu scen: {manual_scenes_str}")
+
         if args.output_dir:
             output_dir = args.output_dir
         if args.segment_duration:
             segment_duration = args.segment_duration
-        if args.frames_per_segment:
-            frames_per_segment = args.frames_per_segment
         if args.dataset_name:
             dataset_name = args.dataset_name
         if args.ragflow_api_url or args.ragflow_api_key:
@@ -1288,6 +1314,9 @@ def main():
                 RAGFLOW_API_URL = args.ragflow_api_url
             if args.ragflow_api_key:
                 RAGFLOW_API_KEY = args.ragflow_api_key
+
+        if args.enable_video_analysis:
+            skip_video_analysis = False
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -1300,7 +1329,6 @@ def main():
 
     all_document_ids = []
     
-    # Process each video
     for video_index, video_path_raw in enumerate(video_paths):
         print(f"\n{'='*80}")
         print(f"Przetwarzanie wideo {video_index + 1}/{len(video_paths)}: {os.path.basename(video_path_raw)}")
@@ -1314,13 +1342,20 @@ def main():
         else:
             logger.info("ℹ️ Funkcja znaczników czasu jest wyłączona")
 
-        # Create separate output directory for each video
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         video_output_dir = os.path.join(output_dir, video_name)
         os.makedirs(video_output_dir, exist_ok=True)
 
         logger.info(f"Rozpoczynam przetwarzanie wideo: {video_path}")
         logger.info(f"Katalog wyjściowy: {video_output_dir}")
+        
+        global_visual_analysis = None
+        if not skip_video_analysis:
+            logger.info("Rozpoczynam globalną analizę wizualną całego wideo")
+            global_visual_analysis = analyze_video_content(
+                video_path, openai_api_key, frames_count=10000, timestamps=video_timestamps_enabled, 
+                segment_start_time=0, output_dir=video_output_dir
+            )
         
         segments = segment_video(video_path, video_output_dir, segment_duration, video_timestamps_enabled)
 
@@ -1331,7 +1366,7 @@ def main():
         results = []
         for segment in segments:
             logger.info(f"Rozpoczynam przetwarzanie segmentu {segment['index'] + 1}/{len(segments)}")
-            result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis, frames_per_segment, segment_duration=segment_duration, video_path=video_path, timestamps=video_timestamps_enabled)
+            result = process_video_segment(segment, elevenlabs_api_key, openai_api_key, skip_video_analysis=skip_video_analysis, segment_duration=segment_duration, video_path=video_path, timestamps=video_timestamps_enabled)
             results.append(result)
 
         logger.info("Rozpoczynam generowanie kompleksowego raportu z wszystkich segmentów...")
@@ -1339,12 +1374,11 @@ def main():
             results, 
             video_path, 
             video_output_dir,
-            segment_duration, 
-            frames_per_segment
+            segment_duration,
+            global_visual_analysis=global_visual_analysis
         )
         
         if comprehensive_report_path and RAGFLOW_API_KEY:
-            # Upload this video's report to RAGFlow
             dataset_id = get_dataset_by_name(dataset_name)
             if not dataset_id:
                 dataset_id = create_ragflow_dataset(dataset_name)
@@ -1356,7 +1390,6 @@ def main():
                     update_document_parser_config(dataset_id, comprehensive_doc_id)
                     all_document_ids.append(comprehensive_doc_id)
 
-    # Process all uploaded documents at once
     if RAGFLOW_API_KEY and all_document_ids:
         logger.info(f"Rozpoczynam wsadowe uruchamianie parsowania wszystkich dokumentów, liczba dokumentów: {len(all_document_ids)}")
         

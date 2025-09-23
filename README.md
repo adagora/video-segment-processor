@@ -4,9 +4,10 @@ processing video and upload this to RAGFlow
 ## FEATURES
 - llm vision to detect action on image
 - audio *.mp3 -> transcript scribe_v1, 11labs -> text
-- resports uploaded to RAG DB (RAGFLOW)
-- timestamp
-- analyse more frames per segment
+- resports markdown uploaded to RAG DB (RAGFLOW)
+- timestamp overlay on image
+- automatic scene /frame detection
+- manual scene /frame detection
 
 ## .env
 ```
@@ -20,7 +21,6 @@ SEGMENT_DURATION=200
 OUTPUT_DIR=./video_segments
 DATASET_NAME=zbior_danych_wideo
 SKIP_VIDEO_ANALYSIS=false
-FRAMES_PER_SEGMENT=5
 ```
 
 ### install 
@@ -32,16 +32,23 @@ choco install ffmpeg or winget install "FFmpeg (Essentials Build)" (windows)
 
 ### run
 ```
-python video_segment_processor.py --video "Nowości 2025- Modest Ligfht.mp4" --segment-duration 60
-```
+automatic:
+python video_segment_processor.py --video "video_input/Nowości 2025- Modest Ligfht.mp4" --segment-duration 60 --enable-video-analysis
 
-## Other
-```
-ffprobe -v quiet -print_format json -show_format -show_streams "Nowości 2025- Modest Ligfht_segment_0.mp3"
+python video_segment_processor.py --video "video_input/Szablon prezentacji Bezpieczeństwo 1 — no password manager.mp4" --segment-duration 60 --enable-video-analysis
+
+manual timestamp:
+python video_segment_processor.py --video "video_input/Nowości 2025- Modest Ligfht.mp4" --segment-duration 60 --manual-scenes "0:02,0:03,0:06,0:12,0:35,2:00,2:33,3:05,4:13,4:25,5:25,5:52,6:00,6:30" --enable-video-analysis
 ```
 
 ## Timestamp
 ```
-python video_segment_processor.py --video "video_input\Szablon prezentacji Bezpieczeństwo 1 — no password manager.mp4" --timestamps --segment-duration 60
+python video_segment_processor.py --video "video_input/Nowości 2025- Modest Ligfht.mp4" --segment-duration 60 --enable-video-analysis --timestamps
 ```
 
+
+## testing
+```
+scene detection:
+python test_scene_detection.py
+```
