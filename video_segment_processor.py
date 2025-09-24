@@ -10,6 +10,7 @@ import warnings
 import requests
 import subprocess
 import argparse
+import glob
 from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qs
 from report_generator import create_comprehensive_video_report
@@ -1262,7 +1263,8 @@ def main():
     dataset_name = os.getenv('DATASET_NAME', 'Video Segments Dataset')
 
     skip_video_analysis = os.getenv('SKIP_VIDEO_ANALYSIS', 'false').lower() == 'true'
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja funkcji: Analiza wideo {'pominięta' if skip_video_analysis else 'włączona'}")
+    image_send = os.getenv('IMAGE_SEND', 'false').lower() == 'true'
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja funkcji: Analiza wideo {'pominięta' if skip_video_analysis else 'włączona'}, Wysyłanie obrazów {'włączone' if image_send else 'wyłączone'}")
 
     import logging
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -1391,6 +1393,20 @@ def main():
                 if comprehensive_doc_id:
                     update_document_parser_config(dataset_id, comprehensive_doc_id)
                     all_document_ids.append(comprehensive_doc_id)
+            
+            if image_send and dataset_id:
+                keyframe_pattern = os.path.join(video_output_dir, "*_keyframe_*.jpg")
+                keyframe_files = glob.glob(keyframe_pattern)
+                logger.info(f"Znaleziono {len(keyframe_files)} plików klatek kluczowych do wysłania")
+                for kf_file in keyframe_files:
+                    kf_name = os.path.basename(kf_file)
+                    kf_doc_id = upload_file_to_ragflow(dataset_id, kf_name, kf_file, auto_parse=False)
+                    if kf_doc_id:
+                        update_document_parser_config(dataset_id, kf_doc_id)
+                        all_document_ids.append(kf_doc_id)
+                        logger.info(f"Wysłano klatkę kluczową: {kf_name}")
+                    else:
+                        logger.warning(f"Nie udało się wysłać klatki kluczowej: {kf_name}")
 
     if RAGFLOW_API_KEY and all_document_ids:
         logger.info(f"Rozpoczynam wsadowe uruchamianie parsowania wszystkich dokumentów, liczba dokumentów: {len(all_document_ids)}")
