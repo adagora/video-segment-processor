@@ -92,7 +92,7 @@ class VideoReportGenerator:
 
 {combined_transcript.strip()}
 
-### Details
+### Detale
 - nazwa pliku: {video_name}
 - ścieżka wideo: {video_path}
 - data i czas analizy: {current_time}
@@ -102,7 +102,7 @@ class VideoReportGenerator:
 ## Analiza Wizualna
 {combined_visual_analysis}
 
-### Details
+### Detale
 - Głębokość analizy: Szczegółowa (scena, postacie, działania, atmosfera)
 - model analizy: OpenAI GPT-4o Vision
 

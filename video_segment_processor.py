@@ -990,6 +990,7 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
         scene_times = []
         
         if not manual_only_mode:
+            # Standard automatic FFmpeg scene detection
             logger.info(f"Automatyczna detekcja zmian scen w {video_path} z progiem {scene_threshold}")
             
             scene_cmd = [
@@ -1116,19 +1117,20 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
                     "content": [
                         {
                             "type": "text",
-                            "text": """Przeanalizuj dokładnie załączony obraz będący slajdem prezentacji i wypisz wszystkie możliwe informacje w formie szczegółowej listy punktowanej. Nie analizuj zduplikowanych tych samych obrazów. Uwzględnij:
+                            "text": """ Jesteś ekspertem w dziedzinie analizy multimediów, specjalizującym się w tworzeniu ustrukturyzowanej dokumentacji na podstawie materiałów wideo. Twoim zadaniem jest precyzyjna analiza załączonej klatki z prezentacji wideo i wygenerowanie raportu w formacie Markdown,  grupując je według poniższych kategorii:
 
-Tytuł i nagłówki – rozpoznaj główny nagłówek slajdu.
+- **Tytuł i nagłówki** – rozpoznaj główny nagłówek slajdu.
+- **Struktura treści** (OCR) – odczytaj wszystkie numery oraz nazwy punktów agendy, ich kolejność oraz język (uwzględniaj polskie znaki diakrytyczne). Nagłówki oznacz jako pogrubione.
+- **Logo:** *Czy widoczne jest logo? Jeśli tak, opisz je (np. Logo Acme).*
+- **Dodatkowe szczegóły** – uwzględnij wszelkie napisy w stopce, znaki wodne, metadane, informacje techniczne oraz drobne elementy graficzne widoczne na obrazie.
+- **Interpretacja treści** – wyjaśnij, czego dotyczy agenda (np. nowe produkty, technologie, funkcje).
 
-Struktura treści – odczytaj wszystkie numery, nazwy punktów agendy, kolejność i język (w tym polskie znaki).
+Jeśli w którejkolwiek kategorii nie występują wymagane elementy, wyraźnie to zaznacz, dodając adnotację: „Nie znaleziono”.
 
-Logo i branding – wskaż obecność logotypu (litera W = logo firmy Acme).
+# Format Wyniku
+Odpowiedź zwróć jako uporządkowaną listę punktowaną w języku polskim, pogrupowaną według powyższych kategorii (uwzględnij każdą kategorię, nawet jeśli nie znaleziono w niej żadnych elementów). W każdej kategorii wypisz znalezione elementy jako podpunkty w stylu Markdown ('-'). Jeśli nie znaleziono żadnych elementów w danej kategorii, wpisz: „Nie znaleziono”.
 
-Dodatkowe szczegóły – np. wszelkie napisy w stopce, znaki wodne, metadane lub informacje techniczne widoczne na obrazie.
-
-Interpretacja treści – wyjaśnij, czego dotyczy agenda (np. nowe produkty, technologie, funkcje).
-
-Zadbaj, aby wynik był pełną, precyzyjną i uporządkowaną listą punktów, nie pomijając żadnych detali, nawet drobnych elementów graficznych."""
+Zakończ zadanie krótką walidacją: upewnij się, że wszystkie kategorie zostały wypełnione zgodnie z wytycznymi, i jeśli występują niejasności lub braki, odnotuj to w podsumowaniu."""
                         },
                         {
                             "type": "image_url",
@@ -1147,7 +1149,7 @@ Zadbaj, aby wynik był pełną, precyzyjną i uporządkowaną listą punktów, n
             )
 
             analysis = response.choices[0].message.content
-            analyses.append(f"Analiza klatki {idx} (czas: {frame_times[idx-1]:.2f}s):\n{analysis}")
+            analyses.append(f"Analiza klatki {idx}:\n{analysis}")
 
         combined_analysis = "\n\n---\n\n".join(analyses)
         logger.info(f"Analiza przez OpenAI Vision zakończona sukcesem, {len(frame_paths)} klatek, długość tekstu: {len(combined_analysis)}")
