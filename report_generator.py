@@ -56,7 +56,6 @@ class VideoReportGenerator:
         _, total_duration_formatted = self.get_video_duration(video_path)
         
         combined_transcript = ""
-        visual_descriptions = []
         
         for result in all_results:
             segment_info = result.get('segment_info', {})
@@ -69,20 +68,11 @@ class VideoReportGenerator:
                 combined_transcript += granular_transcript + "\n\n"
             elif original_transcript and original_transcript.strip():
                 combined_transcript += original_transcript + "\n\n"
-            
-            visual_analysis = result.get('visual_analysis', '')
-            if (visual_analysis and visual_analysis.strip() and 
-                not visual_analysis.startswith("Nie") and 
-                not visual_analysis.startswith("Pominięto")):
-                
-                visual_descriptions.append(visual_analysis)
         
         if global_visual_analysis:
             combined_visual_analysis = global_visual_analysis
         else:
-            combined_visual_analysis = "\n\n---\n\n".join(visual_descriptions).strip()
-            if not combined_visual_analysis:
-                combined_visual_analysis = "Brak analizy wizualnej - sprawdź konfigurację API OpenAI lub została pominięta"
+            combined_visual_analysis = "Brak analizy wizualnej - sprawdź konfigurację API OpenAI lub została pominięta"
         
         current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
@@ -112,16 +102,6 @@ class VideoReportGenerator:
         return report
     
     def save_report(self, report_content: str, output_path: str) -> bool:
-        """
-        Save report content to a file.
-        
-        Args:
-            report_content: The report content to save
-            output_path: Path where to save the report
-            
-        Returns:
-            True if successful, False otherwise
-        """
         try:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             

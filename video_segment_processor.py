@@ -537,7 +537,7 @@ def upload_file_to_ragflow(dataset_id, file_name, file_path, file_type=None, aut
         return None
 
 
-def segment_video(video_path, output_dir, segment_duration=200, timestamps=False):
+def segment_video(video_path, output_dir, segment_duration=1800, timestamps=False):
     """
     Segmentuje wideo i zapisuje do określonego katalogu.
 
@@ -581,7 +581,9 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
             'index': i,
             'start_time': start_time,
             'end_time': end_time,
-            'duration': end_time - start_time
+            'duration': end_time - start_time,
+            'audio_start_time': start_time,
+            'audio_end_time': end_time
         }
 
         mp4_path = os.path.join(output_dir, f"{video_name}_segment_{i}.mp4")
@@ -632,7 +634,7 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
             continue
 
         try:
-            logger.info(f"Wyodrębnianie segmentu audio {i + 1}/{num_segments}")
+            logger.info(f"Wyodrębnianie segmentu audio {i + 1}/{num_segments}: {start_time:.2f}s - {end_time:.2f}s")
             subprocess.run([
                 'ffmpeg', '-y', '-ss', str(start_time),
                 '-to', str(end_time), '-i', video_path,
@@ -650,7 +652,7 @@ def segment_video(video_path, output_dir, segment_duration=200, timestamps=False
     return segments
 
 
-def create_granular_transcript(words_data, segment_start_time=0, timestamp_interval=10, sentence_timestamps=True):
+def create_granular_transcript(words_data, segment_start_time=0, timestamp_interval=10, sentence_timestamps=True, word_level_timestamps=False):
     """
     Tworzy transkrypt z granularnymi znacznikami czasu na podstawie danych słowo-po-słowie.
     
@@ -659,16 +661,24 @@ def create_granular_transcript(words_data, segment_start_time=0, timestamp_inter
         segment_start_time: Czas rozpoczęcia segmentu w oryginalnym wideo (w sekundach)
         timestamp_interval: Interwał znaczników czasu (w sekundach)
         sentence_timestamps: Czy dodawać znaczniki czasu na początku nowych zdań
+        word_level_timestamps: Czy dodawać znaczniki czasu dla każdego słowa (może być przytłaczające)
         
     Returns:
         str: Transkrypt z granularnymi znacznikami czasu
+        
+    Notes:
+        Granularity considerations:
+        - Word-level: Most precise but cluttered, hard to read, causes context rot
+        - Sentence-level: Good balance of precision and readability
+        - Interval-based: Clean readable format, adequate precision for most use cases
     """
     if not words_data:
         return "Brak danych do przetworzenia."
     
     def format_time(seconds):
         """Formatuj czas w formacie [HH:MM:SS] lub [MM:SS]"""
-        total_seconds = int(segment_start_time + seconds)
+        # If segment_start_time is 0, it means timestamps are already absolute
+        total_seconds = int(segment_start_time + seconds) if segment_start_time > 0 else int(seconds)
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         secs = total_seconds % 60
@@ -708,6 +718,11 @@ def create_granular_transcript(words_data, segment_start_time=0, timestamp_inter
             current_text = f"[{timestamp} - {speaker_id}] "
             sentence_ended = False 
         
+        elif word_level_timestamps and token_type == "word" and text.strip():
+            timestamp = format_time(start_time)
+            current_text += f" {timestamp} "
+            last_timestamp_time = start_time
+            
         elif sentence_timestamps and sentence_ended and token_type == "word" and text.strip():
             if (start_time - last_timestamp_time) >= 2:
                 timestamp = format_time(start_time)
@@ -991,7 +1006,6 @@ def analyze_video_content(video_path, openai_api_key=None, frames_count=1, times
         scene_times = []
         
         if not manual_only_mode:
-            # Standard automatic FFmpeg scene detection
             logger.info(f"Automatyczna detekcja zmian scen w {video_path} z progiem {scene_threshold}")
             
             scene_cmd = [
@@ -1169,8 +1183,7 @@ Analiza wizualna fragmentu wideo (ID: {segment_id}, wykryte slajdy: {len(selecte
         logger.error(f"Stos błędów: {traceback.format_exc()}")
         return f"Błąd podczas analizy zawartości wideo: {str(e)}"
 
-
-def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, segment_duration=200, video_path=None, timestamps=False):
+def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=None, skip_video_analysis=False, segment_duration=1800, video_path=None, timestamps=False):
     """
     Przetwarza pojedynczy segment wideo, w tym transkrypcję mowy na tekst i analizę zawartości wideo.
 
@@ -1188,8 +1201,7 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
     """
     result = {
         'segment_info': segment_info,
-        'transcript': None,
-        'visual_analysis': None
+        'transcript': None
     }
 
     if 'mp3_path' in segment_info:
@@ -1201,9 +1213,20 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
         if raw_words:
             logger.info("Generuję transkrypt z granularnymi znacznikami czasu...")
             segment_start_time = segment_info.get('start_time', 0)
+            
+            # Adjust timestamps to be absolute in the original video
+            adjusted_words = []
+            for token in raw_words:
+                adj_token = token.copy()
+                if 'start' in adj_token:
+                    adj_token['start'] = segment_start_time + adj_token['start']
+                if 'end' in adj_token:
+                    adj_token['end'] = segment_start_time + adj_token['end']
+                adjusted_words.append(adj_token)
+            
             granular_transcript = create_granular_transcript(
-                raw_words, 
-                segment_start_time, 
+                adjusted_words, 
+                segment_start_time=0,  # Timestamps are already absolute
                 timestamp_interval=10, 
                 sentence_timestamps=True
             )
@@ -1211,13 +1234,6 @@ def process_video_segment(segment_info, elevenlabs_api_key=None, openai_api_key=
             logger.info(f"Wygenerowano granularny transkrypt o długości {len(granular_transcript)} znaków")
         else:
             result['granular_transcript'] = transcript
-    if 'mp4_path' in segment_info and not skip_video_analysis:
-        logger.info(f"Rozpoczynam analizę zawartości wideo: {segment_info['mp4_path']}")
-        visual_analysis = analyze_video_content(segment_info['mp4_path'], openai_api_key, timestamps=timestamps, segment_start_time=segment_info.get('start_time', 0))
-        result['visual_analysis'] = visual_analysis
-    elif skip_video_analysis:
-        logger.info("Pominięto analizę zawartości wideo")
-        result['visual_analysis'] = "Pominięto analizę zawartości wideo (konto API może mieć zaległości w płatnościach lub problemy z uprawnieniami)"
 
     output_dir = os.path.dirname(segment_info.get('mp4_path', ''))
     if output_dir:
@@ -1259,7 +1275,7 @@ def main():
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Konfiguracja ścieżek wideo zakończona: {len(video_paths)} plików wideo")
 
     output_dir = os.getenv('OUTPUT_DIR', './video_segments')
-    segment_duration = int(os.getenv('SEGMENT_DURATION', '200'))
+    segment_duration = int(os.getenv('SEGMENT_DURATION', '1800'))
     dataset_name = os.getenv('DATASET_NAME', 'Video Segments Dataset')
 
     skip_video_analysis = os.getenv('SKIP_VIDEO_ANALYSIS', 'false').lower() == 'true'
